@@ -32,4 +32,16 @@ Each entry: date, decision, why, and the alternatives that were rejected.
 - **Rejected:** Designing the FM parser before we have a sample. The format can't be verified without one.
 
 ## D-007 · 2026-11-18 · Hosting comes later, gated on a terms-of-use check
-- **Decision:** It will be hosted eventually on the user's website. Before deploying, confirm that PitchAPI's terms allow caching and display of their data. The review we found states no data license.
+- **Decision:** It will be hosted eventually on the user's website. Before deploying, confirm that PitchAPI's terms allow caching and display of their data. The review we found states no data license, and neither do the official docs (checked 2026-11-19).
+
+## D-008 · 2026-11-19 · Repo structure: one repo, `src/` layout, layered packages
+- **Decision:**
+  - One repo containing `backend/` and `frontend/`.
+  - The backend is a single `scouting` package in a `src/` layout, with one subpackage per layer: `config`, `domain`, `adapters/{pitchapi,fm}`, `db`, `ingest`, `metrics`, `mappings`, `api`, `cli`.
+  - The dependency rules in `docs/ARCHITECTURE.md`; in particular, `api` never imports `adapters`.
+  - `frontend/` is created by the Vite scaffolder when it's needed, in Phase 3/4.
+- **Why:** The folders mirror the architecture's layers, so a layer violation shows up as a visibly wrong import. The `src/` layout makes tests run against the installed package.
+- **Rejected:**
+  - Separate repos for backend and frontend: overhead for a solo project.
+  - A flat layout: import mistakes hide.
+  - One package per layer: overkill at this size.

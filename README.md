@@ -85,21 +85,34 @@ PitchAPI has no player search and no season totals, because its data is match-le
 
 ## Repository layout
 
-Planned. Directories are added as each phase needs them.
+Layer rules and dependency rules are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ```
 .
-├── backend/            # Python package: adapters, normalizer, engine, FastAPI app, sync CLI
-│   └── tests/
-│       └── fixtures/   # Trimmed real API responses / FM exports used by tests
-├── frontend/           # Vite + React app
+├── backend/
+│   ├── src/scouting/
+│   │   ├── config/        # Settings from environment
+│   │   ├── domain/        # Canonical model (no I/O)
+│   │   ├── adapters/      # Layer 1: pitchapi/, fm/
+│   │   ├── db/            # Layer 2: tables, sessions, upserts
+│   │   ├── ingest/        # Layer 2: normalization + sync state
+│   │   ├── metrics/       # Layer 3: registry, per-90, peer groups, percentiles
+│   │   ├── mappings/      # YAML: FM header map, comparability, position templates
+│   │   ├── api/           # Layer 4: FastAPI
+│   │   └── cli/           # Typer entry points
+│   ├── migrations/        # Alembic
+│   ├── scripts/           # One-off scripts (Phase 0 spike)
+│   └── tests/             # unit/, integration/, fixtures/
+├── frontend/              # Layer 5: Vite + React (created in Phase 3/4)
 ├── docs/
-│   └── PLAN.md         # Roadmap, phases, open questions
-├── data/               # Local SQLite DB + caches (gitignored)
-├── DECISIONS.md        # Decision log
-├── CLAUDE.md           # Working rules for AI-assisted development
-├── MEMORY.md           # Session-to-session progress log
-├── ERRORS.md           # Approaches that failed and what worked
+│   ├── PLAN.md            # Roadmap, phases, open questions
+│   ├── ARCHITECTURE.md    # Layers and dependency rules
+│   └── PITCHAPI_NOTES.md  # Verified API facts and gotchas
+├── data/                  # Local SQLite DB + spike output (gitignored)
+├── DECISIONS.md           # Decision log
+├── CLAUDE.md              # Working rules for AI-assisted development
+├── MEMORY.md              # Session-to-session progress log
+├── ERRORS.md              # Approaches that failed and what worked
 └── .env.example
 ```
 

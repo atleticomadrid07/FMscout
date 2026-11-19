@@ -1,6 +1,6 @@
 # PLAN.md: Dual Soccer + FM Scouting Tool
 
-Last updated: 2026-11-18. Decisions and the reasoning behind them are in [DECISIONS.md](../DECISIONS.md).
+Last updated: 2026-11-19. Decisions and the reasoning behind them are in [DECISIONS.md](../DECISIONS.md).
 
 ## Scope
 
@@ -72,10 +72,19 @@ Rough load: about 380 matches × 2 match endpoints, plus first-time player profi
 
 ## Open questions
 
-- Does the match player stats response include per-match position and player name? This decides the position rule and how often we need player profile lookups. Answered in Phase 0.
-- Does the SDK expose raw JSON payloads, so we can cache them? If not, the fetch layer uses httpx directly. Answered in Phase 0.
-- Can advanced analytics appear later for a match that first returned `ANALYTICS_UNAVAILABLE`? This decides how often we re-check those matches. Observe over a few weeks.
-- PitchAPI terms of use for caching and redistribution. Must be answered before hosting.
+Verified details are in [PITCHAPI_NOTES.md](PITCHAPI_NOTES.md).
+
+**Answered (2026-11-19, from the docs and the SDK source):**
+- **Season format:** `"2025/2026"`, taken from `/v1/leagues`.
+- **Player names:** included in every player stat row.
+- **Minutes:** `minutes_played` comes with each player's match stats.
+- **Raw JSON from the SDK:** only through the private `_get`. The SDK's models default missing counts to 0, so we parse raw JSON with our own Pydantic models whichever way we fetch. The fetch choice (SDK `_get` vs our own httpx client) is made at Phase 1.
+
+**Still open:**
+- **Per-match position.** The list endpoint's `position_id` is often null. Lineups give starters a formation slot plus `pitch_x`/`pitch_y`, and substitutes a broad category (GK/DEF/MID/ATT). What profile `position_id` numbers mean is undocumented. Settled by the spike.
+- **`chances_created`.** The docs both say it equals `key_passes` and define it as assists + key passes. Settled by the spike.
+- **Late analytics.** Can advanced analytics appear later for a match that first returned `ANALYTICS_UNAVAILABLE`? Observe over a few weeks.
+- **Terms of use for caching and redistribution.** Not in the docs. Ask PitchAPI support. Must be answered before hosting.
 
 ## Backlog (post-MVP ideas)
 
