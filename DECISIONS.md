@@ -1,20 +1,17 @@
 # DECISIONS.md
-
+ 
 Each entry: date, decision, why, and the alternatives that were rejected.
-
+ 
 ## D-001 · 2026-11-18 · Stack: FastAPI + React (option B)
 - **Decision:** Python backend (FastAPI, SQLAlchemy, pandas) and React + TypeScript frontend.
 - **Why:** The stats core is the hardest part, and Python is the stronger tool for it. The API boundary keeps the layers clean. React has no ceiling for the later polish phase. The user also wants to build fluency in Python and React.
 - **Rejected:** A (all Python with Streamlit): fastest to an MVP, but the UI would need rewriting for polish. C (all TypeScript with Next.js): weaker stats tooling, and the TypeScript SDK is very new (Oct 2026).
-
 ## D-002 · 2026-11-18 · SQLite to start, with Alembic migrations
 - **Why:** Zero ops, and the workload is mostly reads. Alembic keeps the schema portable to Postgres if hosting needs it.
 - **Rejected:** Postgres from day one. That's operational overhead before it's needed.
-
 ## D-003 · 2026-11-18 · MVP covers the top 5 leagues, and the crawl starts with EPL
 - **Why:** Gives a vertical slice that's small enough to verify by hand. Each league after that is incremental.
 - **Note:** Peer groups are EPL-only until other leagues are added. The UI must show the peer group.
-
 ## D-004 · 2026-11-18 · Caching: the local DB is the app's only read path
 - **Decision:** The web app reads only from our own database. Only the sync CLI calls PitchAPI. Four layers:
   1. **Raw response cache** keyed by endpoint + normalized parameters, with status, error code, fetched_at and expires_at.
@@ -23,17 +20,13 @@ Each entry: date, decision, why, and the alternatives that were rejected.
   4. **Materialized aggregates and percentiles**, rebuilt after each sync.
 - **Why:** Search and comparison never trigger API traffic, which keeps us polite under fair use. A hosted site can't leak the key or burn the burst limit. Re-normalizing doesn't require re-crawling.
 - **Rejected:** Calling the API on demand with an HTTP cache in front. Search needs a local index regardless, and that approach scales API load with the number of visitors.
-
 ## D-005 · 2026-11-18 · Post-match data only
 - **Decision:** No live data and no `/live` route. Scouting and comparison don't need it.
-
 ## D-006 · 2026-11-18 · FM: FM24 `.rtf` is the primary import; `.fm` is a stretch goal
 - **Decision:** After the PitchAPI metric list is fixed (end of Phase 2), the user builds a matching FM24 view and exports it. The mapping is based on that real file.
 - **Rejected:** Designing the FM parser before we have a sample. The format can't be verified without one.
-
 ## D-007 · 2026-11-18 · Hosting comes later, gated on a terms-of-use check
 - **Decision:** It will be hosted eventually on the user's website. Before deploying, confirm that PitchAPI's terms allow caching and display of their data. The review we found states no data license, and neither do the official docs (checked 2026-11-19).
-
 ## D-008 · 2026-11-19 · Repo structure: one repo, `src/` layout, layered packages
 - **Decision:**
   - One repo containing `backend/` and `frontend/`.
@@ -45,3 +38,10 @@ Each entry: date, decision, why, and the alternatives that were rejected.
   - Separate repos for backend and frontend: overhead for a solo project.
   - A flat layout: import mistakes hide.
   - One package per layer: overkill at this size.
+## D-009 · 2026-11-19 · Fetching: our own httpx client, not the SDK
+- **Decision:** `scouting.adapters.pitchapi.client.PitchApiClient`, a small synchronous httpx client. It returns the raw `data` payload untouched, validates the `{data}` / `{error}` envelope, throttles to 1 request/s, and retries 429/5xx/network errors (honouring `Retry-After`, otherwise exponential backoff with full jitter). 404s come back as results (`ok == False`) for the negative cache; 401, other 4xx and malformed envelopes raise. A `Retry-After` over 300 s raises, so the crawl stops and resumes later instead of blocking.
+- **Why:** The SDK's dataclasses default missing counts to 0, which breaks null ≠ 0, and its raw JSON is only reachable through the private `_get`, which can change in any 0.1.x release. The client is about 300 lines and fully unit-tested with `httpx.MockTransport`. The Phase 0 spike exercises it before Phase 1 builds the cache on top.
+- **Rejected:**
+  - SDK `client._get()`: a private API, and it doesn't fit where our cache sits.
+  - A throwaway httpx script for the spike: Phase 1 would rebuild the same thing.
+ 
