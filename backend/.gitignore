@@ -1,0 +1,18 @@
+# backend-specific ignores (your root .gitignore still applies)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Local data: never commit
+*.db
+*.sqlite3
+.env
+
+# Raw PitchAPI responses from the Phase 0 spike: no data license confirmed yet (D-007)
+spikes/data/
