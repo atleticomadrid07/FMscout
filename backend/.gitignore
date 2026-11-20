@@ -13,6 +13,8 @@ build/
 *.db
 *.sqlite3
 .env
+# Local databases (raw.db, scouting.db)
+data/
 
 # Raw PitchAPI responses from the Phase 0 spike: no data license confirmed yet (D-007)
 spikes/data/
