@@ -244,6 +244,10 @@ class Metric(Base):
     kind: Mapped[str] = mapped_column(String(16))
     source: Mapped[str] = mapped_column(String(32))
     source_key: Mapped[str] = mapped_column(String(100))
+    # Advanced fractions given as two fields: the attempts/weight path (slice 1d).
+    denominator_key: Mapped[str | None] = mapped_column(String(100))
+    # True: the stored value is a per-match rate x denominator (weighted average later).
+    value_is_rate: Mapped[bool] = mapped_column(default=False, server_default="0")
     absence_policy: Mapped[str] = mapped_column(String(32))
     aggregation: Mapped[str] = mapped_column(String(32))
     applies_to: Mapped[str] = mapped_column(String(16))

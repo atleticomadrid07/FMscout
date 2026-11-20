@@ -51,3 +51,64 @@ def snapshot() -> Snapshot:
             }
 
     return take
+
+
+# --- a three-match fixture season (slice 1d) -----------------------------------------------
+#
+# Built from the hand-made m_FIXT01 data so all three fixture matches have full per-match
+# data. Each side of m_FIXT01 is a template: T1 = the home side (4-2-3-1, 5 players incl. an
+# unused sub), T2 = the away side (3-4-2-1, 3 players incl. a sub keeper). Player IDs are
+# rewritten per team ("p_FXGK01" → "p_AGK01" for team A), so a team keeps its players
+# across matches. Still hand-made fixture data, not real PitchAPI data.
+
+SeasonResponses = dict[str, Any]
+SEASON_MATCHES = (  # match, (home team, template, letter), (away team, template, letter)
+    ("m_FIXT01", ("t_FIXTA1", "T1", "A"), ("t_FIXTB2", "T2", "B")),
+    ("m_FIXT02", ("t_FIXTB2", "T2", "B"), ("t_FIXTC3", "T1", "C")),
+    ("m_FIXT03", ("t_FIXTC3", "T1", "C"), ("t_FIXTA1", "T2", "A")),
+)
+_TEMPLATES = {"T1": ("t_FIXTA1", "home"), "T2": ("t_FIXTB2", "away")}
+
+
+@pytest.fixture
+def season_responses(load_fixture: LoadFixture) -> SeasonResponses:
+    """API path → `data` payload for a whole fixture season, profiles included."""
+    players = load_fixture("match_players.json")
+    advanced = load_fixture("match_advanced.json")["players"]
+    lineups = load_fixture("match_lineups.json")
+
+    def side(template: str, team: str, letter: str) -> tuple[Any, Any, Any]:
+        source_team, lineup_side = _TEMPLATES[template]
+        picked = (
+            [r for r in players if r["team_id"] == source_team],
+            [r for r in advanced if r["team_id"] == source_team],
+            lineups[lineup_side],
+        )
+        text = json.dumps(picked).replace("p_FX", f"p_{letter}").replace(source_team, team)
+        loaded: tuple[Any, Any, Any] = tuple(json.loads(text))
+        return loaded
+
+    responses: SeasonResponses = {
+        "/v1/leagues": load_fixture("leagues.json"),
+        "/v1/leagues/l_FIXT01/matches": load_fixture("match_list.json"),
+    }
+    names: dict[str, str] = {}
+    for match_id, home, away in SEASON_MATCHES:
+        h_rows, h_adv, h_side = side(home[1], home[0], home[2])
+        a_rows, a_adv, a_side = side(away[1], away[0], away[2])
+        responses[f"/v1/matches/{match_id}/players"] = h_rows + a_rows
+        responses[f"/v1/matches/{match_id}/advanced/players"] = {"players": h_adv + a_adv}
+        responses[f"/v1/matches/{match_id}/lineups"] = {"home": h_side, "away": a_side}
+        names.update({r["player"]["id"]: r["player"]["name"] for r in h_rows + a_rows})
+    for player_id, name in names.items():
+        first, _, last = name.partition(" ")
+        responses[f"/v1/players/{player_id}"] = {
+            "id": player_id,
+            "name": name,
+            "short_name": f"{first[0]}. {last}",
+            "shirt_number": "7",
+            "position_id": 11 if "GK" in player_id else 2,
+            "country_code": "ENG",
+            "image_url": None,
+        }
+    return responses

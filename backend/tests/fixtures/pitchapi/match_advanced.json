@@ -41,7 +41,14 @@
         },
         "goalkeeping": {
           "distributions": 30,
-          "claim_rate": null
+          "distribution_accuracy": 80.0,
+          "launches": 6,
+          "launch_pct": 20.0,
+          "claims": 2,
+          "claims_won": 2,
+          "claim_rate": 100,
+          "avg_pass_length": 31.5,
+          "sweeper_actions": 1
         }
       },
       {
@@ -199,8 +206,15 @@
           "interceptions": 1
         },
         "goalkeeping": {
-          "distributions": 30,
-          "claim_rate": null
+          "distributions": 25,
+          "distribution_accuracy": 60.0,
+          "launches": 10,
+          "launch_pct": 40.0,
+          "claims": 0,
+          "claims_won": 0,
+          "claim_rate": null,
+          "avg_pass_length": 45.0,
+          "sweeper_actions": 0
         }
       },
       {
@@ -226,14 +240,17 @@
         },
         "carrying": {
           "progressive_carries": 5,
-          "carries": 20
+          "carries": 20,
+          "take_ons": 5,
+          "take_ons_won": 3
         },
         "creation": {
           "chances_created": 2,
-          "sca": 1,
+          "sca": 3,
           "gca": 0,
           "sca_breakdown": {
-            "pass_live": 1
+            "pass_live": 2,
+            "pass_dead": 1
           }
         },
         "defending": {

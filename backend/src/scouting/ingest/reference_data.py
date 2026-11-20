@@ -19,6 +19,8 @@ def _metric_values(d: MetricDef) -> dict[str, object]:
         "kind": d.kind,
         "source": d.source,
         "source_key": d.source_key,
+        "denominator_key": d.denominator_key,
+        "value_is_rate": d.value_is_rate,
         "absence_policy": d.absence_policy,
         "aggregation": d.aggregation,
         "applies_to": d.applies_to,

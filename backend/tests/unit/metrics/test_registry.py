@@ -42,10 +42,39 @@ def test_advanced_keys_are_group_dot_field() -> None:
             assert group in groups and name, metric.code
 
 
-def test_keeper_metrics_use_keeper_only_keys() -> None:
+def test_keeper_metrics_use_keeper_only_fields() -> None:
     for metric in REGISTRY:
-        if metric.applies_to == "gk":
+        if metric.applies_to != "gk":
+            continue
+        if metric.source == "pitchapi_players":
             assert metric.source_key in KEEPER_ONLY_KEYS, metric.code
+        else:
+            assert metric.source_key.startswith("goalkeeping."), metric.code
+
+
+def test_registry_size() -> None:
+    assert len(REGISTRY) == 95
+
+
+def test_denominator_key_only_for_advanced_fractions() -> None:
+    for metric in REGISTRY:
+        if metric.denominator_key is not None:
+            assert metric.source == "pitchapi_advanced" and metric.is_fraction, metric.code
+        elif metric.source == "pitchapi_advanced":
+            assert not metric.is_fraction, f"{metric.code}: advanced fraction needs a denominator"
+
+
+def test_rates_are_weighted_fractions_and_not_per_90() -> None:
+    rates = [m for m in REGISTRY if m.value_is_rate]
+    assert {m.code for m in rates} == {
+        "distribution_accuracy",
+        "launch_pct",
+        "claim_rate",
+        "avg_pass_length",
+    }
+    for metric in rates:
+        assert metric.is_fraction and metric.denominator_key is not None, metric.code
+        assert not metric.per90_allowed, metric.code
 
 
 def test_model_outputs_are_flagged() -> None:
@@ -54,8 +83,10 @@ def test_model_outputs_are_flagged() -> None:
     assert not {"goals", "shots", "tackles"} & models
 
 
-def test_chances_created_is_not_double_counted() -> None:
-    """chances_created == key_passes (spike, 277/277): only one of them is registered."""
+def test_chances_created_is_never_double_counted() -> None:
+    """The advanced chances_created equals key_passes (spike, 277/277), so it isn't registered.
+    The /players chances_created is kept as an alternative definition, labeled as such."""
     keys = {m.source_key for m in REGISTRY}
     assert "passing.key_passes" in keys
-    assert "chances_created" not in keys and "creation.chances_created" not in keys
+    assert "creation.chances_created" not in keys
+    assert "Never add it to key_passes" in BY_CODE["chances_created"].description

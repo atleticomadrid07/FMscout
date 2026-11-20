@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from scouting.adapters.pitchapi.raw_store import RawRecord
 from scouting.adapters.pitchapi.schemas import LeaguesPayload, MatchListPayload
-from scouting.db.models import Appearance, Player, PlayerSourceId
+from scouting.db.models import Appearance, Metric, Player, PlayerSourceId, StatValue
 from scouting.ingest.match_detail import find_match, normalize_match
 from scouting.ingest.match_list import normalize_match_list
 
@@ -113,3 +113,42 @@ def test_canonical_minutes_cap_at_90(synced: Engine) -> None:
     with Session(synced) as session:
         assert session.scalar(select(func.max(Appearance.minutes))) == 90
         assert (session.scalar(select(func.count()).select_from(Player)) or 0) >= 22
+
+
+# --- slice 1d registry invariants on real data --------------------------------------------
+
+
+def _values(engine: Engine, code: str) -> dict[int, tuple[float | None, float | None]]:
+    """appearance_id → (value, denominator) for one metric."""
+    with Session(engine) as session:
+        rows = session.execute(
+            select(StatValue.appearance_id, StatValue.value, StatValue.denominator)
+            .join(Metric, Metric.id == StatValue.metric_id)
+            .where(Metric.code == code)
+        ).all()
+    return {appearance_id: (value, denominator) for appearance_id, value, denominator in rows}
+
+
+def test_sca_breakdown_sums_to_sca(synced: Engine) -> None:
+    sca = _values(synced, "sca")
+    parts = [
+        _values(synced, f"sca_{part}")
+        for part in ("pass_live", "pass_dead", "take_on", "shot", "defensive")
+    ]
+    assert sca
+    for appearance_id, (total, _) in sca.items():
+        assert sum(part[appearance_id][0] or 0.0 for part in parts) == total
+
+
+def test_keeper_rates_are_weighted_and_bounded(synced: Engine) -> None:
+    alisson = _appearance(synced, "p_0DQRGp").id
+    value, weight = _values(synced, "distribution_accuracy")[alisson]
+    assert weight is not None and weight > 0
+    assert value is not None and 0 <= value / weight <= 100  # sent as a percentage
+    assert alisson not in _values(synced, "sca")  # outfield metrics skip keepers
+
+
+def test_outfield_players_have_no_keeper_rows(synced: Engine) -> None:
+    salah = _appearance(synced, "p_1reWwN").id
+    assert salah not in _values(synced, "distribution_accuracy")
+    assert salah in _values(synced, "chances_created")

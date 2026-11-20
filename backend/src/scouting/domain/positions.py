@@ -40,7 +40,8 @@ PEER_ROLE: Final[dict[Role, PeerRole]] = {
     "ST": "ST",
 }
 
-# The 8 formations seen in the Phase 0 spike (9 matches, 5 leagues).
+# The 8 formations seen in the Phase 0 spike (9 matches, 5 leagues), then the 11 more the
+# EPL 2025/26 crawl found: every formation in that season.
 FORMATION_ROLES: Final[dict[str, dict[int, Role]]] = {
     "4-2-3-1": {
         11: "GK",
@@ -94,6 +95,85 @@ FORMATION_ROLES: Final[dict[str, dict[int, Role]]] = {
         51: "WB", 59: "WB",
         73: "CM", 75: "CM", 77: "CM",
         104: "ST", 106: "ST",
+    },
+    # Added after the EPL 2025/26 crawl (`report formations`), with the user's calls:
+    # slot 95 (behind a lone striker) is AM; 4-1-3-2's 83/87 are CM (a narrow diamond);
+    # 4-3-2-1's 84/86 are AM (as in 3-4-2-1); 5-4-1's wide midfielders are W (D-011).
+    "3-5-2": {
+        11: "GK",
+        33: "CB", 35: "CB", 37: "CB",
+        71: "WB", 73: "CM", 75: "CM", 77: "CM", 79: "WB",
+        104: "ST", 106: "ST",
+    },
+    "5-4-1": {
+        11: "GK",
+        33: "CB", 35: "CB", 37: "CB",
+        51: "WB", 59: "WB",
+        72: "W", 74: "CM", 76: "CM", 78: "W",
+        115: "ST",
+    },
+    "4-4-1-1": {
+        11: "GK",
+        32: "FB", 34: "CB", 36: "CB", 38: "FB",
+        72: "W", 74: "CM", 76: "CM", 78: "W",
+        95: "AM",
+        115: "ST",
+    },
+    "3-4-1-2": {
+        11: "GK",
+        33: "CB", 35: "CB", 37: "CB",
+        62: "WB", 64: "CM", 66: "CM", 68: "WB",
+        85: "AM",
+        104: "ST", 106: "ST",
+    },
+    "4-1-3-2": {
+        11: "GK",
+        32: "FB", 34: "CB", 36: "CB", 38: "FB",
+        65: "DM",
+        83: "CM", 85: "AM", 87: "CM",
+        104: "ST", 106: "ST",
+    },
+    "4-3-2-1": {
+        11: "GK",
+        32: "FB", 34: "CB", 36: "CB", 38: "FB",
+        63: "CM", 65: "CM", 67: "CM",
+        84: "AM", 86: "AM",
+        115: "ST",
+    },
+    "4-5-1": {
+        11: "GK",
+        32: "FB", 34: "CB", 36: "CB", 38: "FB",
+        71: "W", 73: "CM", 75: "CM", 77: "CM", 79: "W",
+        115: "ST",
+    },
+    "4-2-2-2": {
+        11: "GK",
+        32: "FB", 34: "CB", 36: "CB", 38: "FB",
+        64: "DM", 66: "DM",
+        82: "W", 88: "W",
+        104: "ST", 106: "ST",
+    },
+    "4-3-1-2": {
+        11: "GK",
+        32: "FB", 34: "CB", 36: "CB", 38: "FB",
+        63: "CM", 65: "CM", 67: "CM",
+        85: "AM",
+        104: "ST", 106: "ST",
+    },
+    "3-5-1-1": {
+        11: "GK",
+        33: "CB", 35: "CB", 37: "CB",
+        71: "WB", 73: "CM", 75: "CM", 77: "CM", 79: "WB",
+        95: "AM",
+        115: "ST",
+    },
+    "5-3-1-1": {
+        11: "GK",
+        33: "CB", 35: "CB", 37: "CB",
+        51: "WB", 59: "WB",
+        73: "CM", 75: "CM", 77: "CM",
+        95: "AM",
+        115: "ST",
     },
 }  # fmt: skip
 

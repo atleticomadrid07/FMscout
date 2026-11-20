@@ -129,11 +129,29 @@ def players_metric_value(
 
 def advanced_metric_value(
     metric: MetricDef, row: AdvancedRow, where: str
-) -> tuple[float | None, float | None]:
+) -> tuple[float | None, float | None] | None:
+    """(value, denominator) for an advanced metric, or None when the metric's group is
+    null for this player (e.g. `goalkeeping` for a sub keeper): no data, so no row."""
+    group = metric.source_key.split(".", 1)[0]
+    found_group, group_value = row.lookup(group)
+    if not found_group or group_value is None:
+        return None
+    here = f"{where} {metric.source_key}"
     found, raw = row.lookup(metric.source_key)
-    if not found:
+    if metric.denominator_key is None:
+        return _number(raw, where=here) if found else _absent(metric)[0], None
+    found_denominator, raw_denominator = row.lookup(metric.denominator_key)
+    denominator = _number(raw_denominator, where=here) if found_denominator else None
+    if denominator is None:
         return _absent(metric)
-    return _number(raw, where=f"{where} {metric.source_key}"), None
+    if metric.value_is_rate:
+        # Weighted average: store rate x weight over weight. With no weight the rate is
+        # undefined and contributes nothing (0 of 0); an unknown rate stays unknown.
+        if denominator == 0:
+            return 0.0, 0.0
+        rate = _number(raw, where=here) if found else None
+        return (None, None) if rate is None else (rate * denominator, denominator)
+    return (_number(raw, where=here) if found else 0.0), denominator
 
 
 def _is_goalkeeper(lineup: _LineupInfo | None, flat: dict[str, StatValue]) -> bool:
@@ -321,7 +339,10 @@ def normalize_match(
             if metric.source == "pitchapi_players":
                 value, denominator = players_metric_value(metric, flat, where)
             elif advanced_row is not None:
-                value, denominator = advanced_metric_value(metric, advanced_row, where)
+                advanced_value = advanced_metric_value(metric, advanced_row, where)
+                if advanced_value is None:
+                    continue  # the metric's group is null for this player: no row
+                value, denominator = advanced_value
             else:
                 continue  # advanced unavailable for this match/player: no row, no exposure
             stat_rows.append(
@@ -352,10 +373,12 @@ def normalize_match(
     match.normalized_at = to_utc_naive(max(r.fetched_at for r in (players, advanced, lineups)))
     session.flush()
 
+    # DEBUG, not WARNING: a season sync would repeat these for every match. Both CLI
+    # commands print them once, with counts, in their summary.
     for key in sorted(summary.unknown_keys):
-        logger.warning("new /players stat key not in the registry or known list: %s", key)
+        logger.debug("new /players stat key not in the registry or known list: %s", key)
     for formation, slot in summary.unmapped_slots:
-        logger.warning("no role mapping for formation %s slot %s", formation, slot)
+        logger.debug("no role mapping for formation %s slot %s", formation, slot)
     return summary
 
 

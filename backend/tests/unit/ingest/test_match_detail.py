@@ -30,20 +30,24 @@ from scouting.db.models import (
     PlayerSourceId,
     StatValue,
 )
+from scouting.domain.positions import FORMATION_ROLES
 from scouting.ingest.match_detail import MatchDetailSummary, find_match, normalize_match
 from scouting.ingest.match_list import SyncError, normalize_match_list
 from scouting.metrics.registry import REGISTRY
 
 T0 = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 MATCH = "m_FIXT01"
-OUTFIELD_METRICS = sum(1 for m in REGISTRY if m.applies_to != "gk")  # 17
-GK_METRICS = sum(1 for m in REGISTRY if m.applies_to != "outfield")  # 5
+OUTFIELD_METRICS = sum(1 for m in REGISTRY if m.applies_to != "gk")
+GK_METRICS = sum(1 for m in REGISTRY if m.applies_to != "outfield")
 ADVANCED_OUTFIELD = sum(
     1 for m in REGISTRY if m.source == "pitchapi_advanced" and m.applies_to != "gk"
 )
 ADVANCED_GK = sum(
     1 for m in REGISTRY if m.source == "pitchapi_advanced" and m.applies_to != "outfield"
 )
+# Metrics read from the advanced `goalkeeping` group, which is null for sub keepers (Hal).
+GOALKEEPING_GROUP = sum(1 for m in REGISTRY if m.source_key.startswith("goalkeeping."))
+SUB_KEEPER_METRICS = GK_METRICS - GOALKEEPING_GROUP
 
 
 def record(
@@ -206,9 +210,10 @@ def test_player_search_name_is_accent_free(match_db: Engine, normalize: Normaliz
 
 def test_stat_value_counts_follow_applies_to(match_db: Engine, normalize: Normalize) -> None:
     summary = normalize()
-    assert summary.stat_values == 4 * OUTFIELD_METRICS + 3 * GK_METRICS
+    assert summary.stat_values == 4 * OUTFIELD_METRICS + 2 * GK_METRICS + SUB_KEEPER_METRICS
     assert len(stats(match_db, "p_FXST01")) == OUTFIELD_METRICS
     assert len(stats(match_db, "p_FXGK01")) == GK_METRICS
+    assert len(stats(match_db, "p_FXGK03")) == SUB_KEEPER_METRICS  # no goalkeeping group
 
 
 def test_keepers_get_no_outfield_rows_and_outfielders_no_saves(
@@ -255,6 +260,37 @@ def test_advanced_metrics(match_db: Engine, normalize: Normalize) -> None:
     assert s["xt"] == (0.33, None)
 
 
+def test_two_field_fractions_and_breakdowns(match_db: Engine, normalize: Normalize) -> None:
+    normalize()
+    ten = stats(match_db, "p_FXAM01")
+    assert ten["take_ons_completed"] == (3.0, 5.0)  # take_ons_won of take_ons
+    assert ten["sca_pass_live"] == (2.0, None) and ten["sca_pass_dead"] == (1.0, None)
+    assert ten["sca_take_on"] == (0.0, None)  # breakdown key missing → 0 (spike-verified)
+    assert stats(match_db, "p_FXLB01")["take_ons_completed"] == (0.0, 0.0)  # both absent
+
+
+def test_keeper_rates_are_stored_weighted(match_db: Engine, normalize: Normalize) -> None:
+    normalize()
+    ada, fay = stats(match_db, "p_FXGK01"), stats(match_db, "p_FXGK02")
+    # rate x weight over weight, so season sums give the exact weighted average
+    assert ada["distribution_accuracy"] == (80.0 * 30, 30.0)
+    assert ada["avg_pass_length"] == (31.5 * 30, 30.0)
+    assert ada["claims_won"] == (2.0, 2.0)
+    assert fay["claim_rate"] == (0.0, 0.0)  # no claims: rate undefined, contributes nothing
+    assert fay["claims_won"] == (0.0, 0.0)
+    assert ada["distributions"] == (30.0, None) and ada["launches"] == (6.0, None)
+
+
+def test_sub_keeper_gets_no_advanced_goalkeeping_rows(
+    match_db: Engine, normalize: Normalize
+) -> None:
+    normalize()
+    hal = stats(match_db, "p_FXGK03")
+    assert "distributions" not in hal and "claim_rate" not in hal
+    assert hal["saves"] == (0.0, None)  # /players keeper stats still there
+    assert hal["sweeper_actions"] == (0.0, None)
+
+
 # --- missing endpoints --------------------------------------------------------------------------
 
 
@@ -297,18 +333,18 @@ def test_player_missing_from_advanced_is_reported(
     assert "xt" not in stats(match_db, "p_FXST01")
 
 
-def test_unmapped_formation_gives_null_role_and_a_warning(
+def test_unmapped_formation_gives_null_role_and_is_reported(
     match_db: Engine, normalize: Normalize, load_fixture: Any, caplog: pytest.LogCaptureFixture
 ) -> None:
     lineups = load_fixture("match_lineups.json")
-    lineups["home"]["formation"] = "4-3-1-2"
-    with caplog.at_level(logging.WARNING):
+    lineups["home"]["formation"] = "4-2-4"
+    with caplog.at_level(logging.DEBUG):  # per match at DEBUG; the CLI summary reports it
         summary = normalize(lineups=lineups)
-    assert ("4-3-1-2", 38) in summary.unmapped_slots
+    assert ("4-2-4", 38) in summary.unmapped_slots
     fullback = appearance(match_db, "p_FXLB01")
     assert fullback.role is None and fullback.slot_code == 38
     assert fullback.is_goalkeeper is False
-    assert "no role mapping for formation 4-3-1-2" in caplog.text
+    assert "no role mapping for formation 4-2-4" in caplog.text
 
 
 def test_unknown_stat_key_is_reported_not_ingested(
@@ -355,14 +391,14 @@ def test_player_removed_by_provider_loses_appearance(
     summary = normalize(players=players)
     assert summary.appearances_removed == 1
     assert count(match_db, Appearance) == 6
-    assert count(match_db, StatValue) == 3 * OUTFIELD_METRICS + 3 * GK_METRICS
+    assert count(match_db, StatValue) == 3 * OUTFIELD_METRICS + 2 * GK_METRICS + SUB_KEEPER_METRICS
 
 
 def test_reference_data_is_synced(match_db: Engine, normalize: Normalize) -> None:
     normalize()
     normalize()
     assert count(match_db, Metric) == len(REGISTRY)
-    assert count(match_db, FormationRole) == 88
+    assert count(match_db, FormationRole) == 11 * len(FORMATION_ROLES)
 
 
 # --- errors -------------------------------------------------------------------------------------

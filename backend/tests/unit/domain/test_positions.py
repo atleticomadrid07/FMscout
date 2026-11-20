@@ -89,3 +89,29 @@ def test_formation_role_rows_cover_every_slot() -> None:
     rows = formation_role_rows()
     assert len(rows) == 11 * len(FORMATION_ROLES)
     assert len({(f, s) for f, s, _, _ in rows}) == len(rows)
+
+
+@pytest.mark.parametrize(
+    ("formation", "slot", "expected"),
+    [
+        ("4-4-1-1", 95, ("AM", "C")),  # a: behind a lone striker → AM
+        ("3-5-1-1", 95, ("AM", "C")),
+        ("5-3-1-1", 95, ("AM", "C")),
+        ("4-1-3-2", 83, ("CM", "R")),  # b: narrow diamond → CM
+        ("4-1-3-2", 87, ("CM", "L")),
+        ("4-3-2-1", 84, ("AM", "R")),  # c: as in 3-4-2-1
+        ("5-4-1", 72, ("W", "R")),  # d: wide midfielders go with wingers (D-011)
+        ("5-4-1", 51, ("WB", "R")),
+    ],
+)
+def test_user_judgement_calls_after_the_epl_crawl(
+    formation: str, slot: int, expected: tuple[str, str]
+) -> None:
+    assert role_for(formation, slot) == expected
+
+
+def test_every_formation_has_one_keeper_and_ten_outfield_slots() -> None:
+    for formation, slots in FORMATION_ROLES.items():
+        assert list(slots.values()).count("GK") == 1, formation
+        defenders = sum(1 for slot in slots if 30 <= slot < 60)
+        assert defenders == int(formation.split("-")[0]), formation  # rows 3 and 5

@@ -229,3 +229,18 @@ class LineupSide(_Payload):
 class LineupsPayload(_Payload):
     home: LineupSide
     away: LineupSide
+
+
+# --- GET /v1/players/{id} -------------------------------------------------------------------
+# Spike-verified fields: id, name, short_name, shirt_number (a string, e.g. "7"),
+# position_id (same grid codes as lineups, or only a broad category), country_code, image_url.
+
+
+class PlayerProfile(_Payload):
+    id: PlayerId
+    name: NonEmpty
+    short_name: str | None = None
+    shirt_number: str | int | None = None
+    position_id: int | None = None
+    country_code: str | None = None
+    image_url: str | None = None
