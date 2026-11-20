@@ -1,0 +1,286 @@
+{
+  "_note": "HAND-MADE TEST FIXTURE, not real PitchAPI data. Shaped like the real /v1/matches/{id}/advanced/players `data` payload (Phase 0 spike, 2026-11-19). Match m_FIXT01 from match_list.json; player names are invented.",
+  "data": {
+    "players": [
+      {
+        "player": {
+          "id": "p_FXGK01",
+          "name": "Ada Keeper",
+          "shirt_number": 1
+        },
+        "team_id": "t_FIXTA1",
+        "minutes_played": 97,
+        "actions": 40,
+        "possession_value": {
+          "xt_total": 0.01,
+          "vaep_total": 0.1,
+          "pv_total": 0.1
+        },
+        "passing": {
+          "key_passes": 0,
+          "progressive_passes": 2,
+          "passes": 30,
+          "assists": 0,
+          "crosses": 2
+        },
+        "carrying": {
+          "progressive_carries": 0,
+          "carries": 20
+        },
+        "creation": {
+          "chances_created": 0,
+          "sca": 1,
+          "gca": 0,
+          "sca_breakdown": {
+            "pass_live": 1
+          }
+        },
+        "defending": {
+          "tackles": 0,
+          "interceptions": 1
+        },
+        "goalkeeping": {
+          "distributions": 30,
+          "claim_rate": null
+        }
+      },
+      {
+        "player": {
+          "id": "p_FXLB01",
+          "name": "Bea Fullbäck",
+          "shirt_number": 1
+        },
+        "team_id": "t_FIXTA1",
+        "minutes_played": 97,
+        "actions": 40,
+        "possession_value": {
+          "xt_total": 0.12,
+          "vaep_total": 0.1,
+          "pv_total": 0.1
+        },
+        "passing": {
+          "key_passes": 1,
+          "progressive_passes": 6,
+          "passes": 30,
+          "assists": 0,
+          "crosses": 2
+        },
+        "carrying": {
+          "progressive_carries": 3,
+          "carries": 20
+        },
+        "creation": {
+          "chances_created": 1,
+          "sca": 1,
+          "gca": 0,
+          "sca_breakdown": {
+            "pass_live": 1
+          }
+        },
+        "defending": {
+          "tackles": 2,
+          "interceptions": 1
+        },
+        "goalkeeping": null
+      },
+      {
+        "player": {
+          "id": "p_FXST01",
+          "name": "Cal Striker",
+          "shirt_number": 1
+        },
+        "team_id": "t_FIXTA1",
+        "minutes_played": 80,
+        "actions": 40,
+        "possession_value": {
+          "xt_total": 0.21,
+          "vaep_total": 0.1,
+          "pv_total": 0.1
+        },
+        "passing": {
+          "key_passes": 0,
+          "progressive_passes": 1,
+          "passes": 30,
+          "assists": 0,
+          "crosses": 2
+        },
+        "carrying": {
+          "progressive_carries": 2,
+          "carries": 20
+        },
+        "creation": {
+          "chances_created": 0,
+          "sca": 1,
+          "gca": 0,
+          "sca_breakdown": {
+            "pass_live": 1
+          }
+        },
+        "defending": {
+          "tackles": 0,
+          "interceptions": 1
+        },
+        "goalkeeping": null
+      },
+      {
+        "player": {
+          "id": "p_FXSB01",
+          "name": "Dev Sub",
+          "shirt_number": 1
+        },
+        "team_id": "t_FIXTA1",
+        "minutes_played": 14,
+        "actions": 40,
+        "possession_value": {
+          "xt_total": 0.02,
+          "vaep_total": 0.1,
+          "pv_total": 0.1
+        },
+        "passing": {
+          "key_passes": 0,
+          "progressive_passes": 0,
+          "passes": 30,
+          "assists": 0,
+          "crosses": 2
+        },
+        "carrying": {
+          "progressive_carries": 1,
+          "carries": 20
+        },
+        "creation": {
+          "chances_created": 0,
+          "sca": 1,
+          "gca": 0,
+          "sca_breakdown": {
+            "pass_live": 1
+          }
+        },
+        "defending": {
+          "tackles": 1,
+          "interceptions": 1
+        },
+        "goalkeeping": null
+      },
+      {
+        "player": {
+          "id": "p_FXGK02",
+          "name": "Fay Keeper",
+          "shirt_number": 1
+        },
+        "team_id": "t_FIXTB2",
+        "minutes_played": 97,
+        "actions": 40,
+        "possession_value": {
+          "xt_total": 0.0,
+          "vaep_total": 0.1,
+          "pv_total": 0.1
+        },
+        "passing": {
+          "key_passes": 0,
+          "progressive_passes": 1,
+          "passes": 30,
+          "assists": 0,
+          "crosses": 2
+        },
+        "carrying": {
+          "progressive_carries": 0,
+          "carries": 20
+        },
+        "creation": {
+          "chances_created": 0,
+          "sca": 1,
+          "gca": 0,
+          "sca_breakdown": {
+            "pass_live": 1
+          }
+        },
+        "defending": {
+          "tackles": 0,
+          "interceptions": 1
+        },
+        "goalkeeping": {
+          "distributions": 30,
+          "claim_rate": null
+        }
+      },
+      {
+        "player": {
+          "id": "p_FXAM01",
+          "name": "Gus Ten",
+          "shirt_number": 1
+        },
+        "team_id": "t_FIXTB2",
+        "minutes_played": 97,
+        "actions": 40,
+        "possession_value": {
+          "xt_total": 0.33,
+          "vaep_total": 0.1,
+          "pv_total": 0.1
+        },
+        "passing": {
+          "key_passes": 2,
+          "progressive_passes": 4,
+          "passes": 30,
+          "assists": 0,
+          "crosses": 2
+        },
+        "carrying": {
+          "progressive_carries": 5,
+          "carries": 20
+        },
+        "creation": {
+          "chances_created": 2,
+          "sca": 1,
+          "gca": 0,
+          "sca_breakdown": {
+            "pass_live": 1
+          }
+        },
+        "defending": {
+          "tackles": 1,
+          "interceptions": 1
+        },
+        "goalkeeping": null
+      },
+      {
+        "player": {
+          "id": "p_FXGK03",
+          "name": "Hal Backup",
+          "shirt_number": 1
+        },
+        "team_id": "t_FIXTB2",
+        "minutes_played": 6,
+        "actions": 40,
+        "possession_value": {
+          "xt_total": 0.0,
+          "vaep_total": 0.1,
+          "pv_total": 0.1
+        },
+        "passing": {
+          "key_passes": 0,
+          "progressive_passes": 0,
+          "passes": 30,
+          "assists": 0,
+          "crosses": 2
+        },
+        "carrying": {
+          "progressive_carries": 0,
+          "carries": 20
+        },
+        "creation": {
+          "chances_created": 0,
+          "sca": 1,
+          "gca": 0,
+          "sca_breakdown": {
+            "pass_live": 1
+          }
+        },
+        "defending": {
+          "tackles": 0,
+          "interceptions": 1
+        },
+        "goalkeeping": null
+      }
+    ]
+  }
+}

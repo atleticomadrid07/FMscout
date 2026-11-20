@@ -76,7 +76,8 @@ match          id PK, season_id FK, kickoff_utc, match_date, status,
                normalized_at (nullable)
 
 appearance     id PK, match_id FK, player_id FK, team_id FK,
-               is_starter,
+               is_starter (nullable; NULL when /lineups had no data),
+               is_goalkeeper,              -- decides which metrics apply (registry applies_to)
                slot_code (nullable; starters' grid code, e.g. 38),
                sub_category (nullable; subs' broad category, 0–3),
                formation (nullable),
@@ -97,8 +98,9 @@ metric         id PK (INTEGER), code UNIQUE (e.g. 'npxg', 'prog_passes'), label,
                kind ('count'|'fraction'|'model'|'rating'|'distance'),
                source ('pitchapi_players'|'pitchapi_advanced'|'fm'),
                source_key (e.g. 'expected_goals_non_penalty' or 'passing.progressive_passes'),
-               absence_policy ('zero'|'null'|'fraction_zero_attempts'|'not_rated'),
-               aggregation ('sum'|'rate_from_sums'|'mean_rated'),
+               absence_policy ('zero'|'null'|'fraction_zero_attempts'),
+               aggregation ('sum'|'rate_from_sums'),
+               applies_to ('all'|'outfield'|'gk'),
                per90_allowed, is_model_output, higher_is_better, description
 
 stat_value     appearance_id FK, metric_id FK,
@@ -109,6 +111,9 @@ stat_value     appearance_id FK, metric_id FK,
 
 - **The registry's source of truth is a typed Python module** (`scouting.metrics.registry`), checked by mypy and tests. The `metric` table is synced from it on each run, so metric IDs stay stable.
 - **Only registry metrics get ingested.** Fantasy points, the shotmap flag and other noise are dropped at parse time, but they stay in `raw.db`.
+- **`applies_to`** (added in slice 1c): a metric that doesn't describe a player gets **no row**, not a 0. A striker has no `saves` row, and a keeper has no `shots` row. A player counts as a goalkeeper if he started in slot 11 or came on as a sub with category 0. Without lineup data, keeper-only stats like `saves` decide it.
+- **`absence_policy`** values are `zero`, `null` and `fraction_zero_attempts`. "Not rated" applies only to `appearance.rating`, which isn't a registry metric.
+- **No `stat_value` row** therefore means one of two things: the metric doesn't apply to the player, or its source had no data for the match (e.g. `ANALYTICS_UNAVAILABLE`). Either way, those minutes don't count as exposure for that metric.
 
 ### Positions
 
@@ -121,8 +126,10 @@ Seeded from code (§7). A (formation, slot) pair that isn't in the table gets `r
 ### Sync state
 
 ```
-sync_state     season_id PK FK, match_list_synced_at (nullable), last_full_sync_at (nullable)
+sync_state     season_id PK FK, match_list_fetched_at (nullable), last_full_sync_at (nullable)
 ```
+
+`match_list_fetched_at` is the `fetched_at` of the match-list response that was used, not the wall-clock time of the sync, so re-running a sync from cache leaves the database identical (renamed from `match_list_synced_at` in slice 1b). Timestamps are stored as naive UTC. The three `match.*_status` columns also have database-side defaults of `'pending'`.
 
 Per-match progress comes from `raw_response` plus the `match.*_status` columns, so a crawl that was killed resumes by fetching whatever is still `pending`.
 
