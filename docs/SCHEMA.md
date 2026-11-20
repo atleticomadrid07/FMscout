@@ -101,7 +101,9 @@ metric         id PK (INTEGER), code UNIQUE (e.g. 'npxg', 'prog_passes'), label,
                absence_policy ('zero'|'null'|'fraction_zero_attempts'),
                aggregation ('sum'|'rate_from_sums'),
                applies_to ('all'|'outfield'|'gk'),
-               per90_allowed, is_model_output, higher_is_better, description
+               per90_allowed, is_model_output, higher_is_better, description,
+               denominator_key (nullable),  -- advanced two-field fractions and keeper-rate weights
+               value_is_rate (default false)  -- value = per-match rate × weight (slice 1d)
 
 stat_value     appearance_id FK, metric_id FK,
                value REAL (nullable),        -- successes for fractions; NULL = unknown/undefined
@@ -113,6 +115,9 @@ stat_value     appearance_id FK, metric_id FK,
 - **Only registry metrics get ingested.** Fantasy points, the shotmap flag and other noise are dropped at parse time, but they stay in `raw.db`.
 - **`applies_to`** (added in slice 1c): a metric that doesn't describe a player gets **no row**, not a 0. A striker has no `saves` row, and a keeper has no `shots` row. A player counts as a goalkeeper if he started in slot 11 or came on as a sub with category 0. Without lineup data, keeper-only stats like `saves` decide it.
 - **`absence_policy`** values are `zero`, `null` and `fraction_zero_attempts`. "Not rated" applies only to `appearance.rating`, which isn't a registry metric.
+- **Two-field fractions** (slice 1d): the advanced endpoint sends some fractions as two counts (e.g. `carrying.take_ons_won` of `carrying.take_ons`). `source_key` is the successes and `denominator_key` the attempts. If the attempts field is missing, the absence policy applies.
+- **Per-match rates** (`value_is_rate`, slice 1d): the keeper rates (`distribution_accuracy`, `launch_pct`, `claim_rate`, `avg_pass_length`) are stored as `value = rate × weight`, `denominator = weight` (distributions or claims), on the scale PitchAPI sends (percentages stay 0–100). A season then gets the exact weighted average through `rate_from_sums`. A weight of 0 stores (0, 0); a NULL rate with a non-zero weight stores (NULL, NULL). These are never per-90'd.
+- **A whole missing group** (e.g. `goalkeeping` is null for a substitute keeper) gives **no rows** for that group's metrics, not zeros.
 - **No `stat_value` row** therefore means one of two things: the metric doesn't apply to the player, or its source had no data for the match (e.g. `ANALYTICS_UNAVAILABLE`). Either way, those minutes don't count as exposure for that metric.
 
 ### Positions
@@ -132,6 +137,15 @@ sync_state     season_id PK FK, match_list_fetched_at (nullable), last_full_sync
 `match_list_fetched_at` is the `fetched_at` of the match-list response that was used, not the wall-clock time of the sync, so re-running a sync from cache leaves the database identical (renamed from `match_list_synced_at` in slice 1b). Timestamps are stored as naive UTC. The three `match.*_status` columns also have database-side defaults of `'pending'`.
 
 Per-match progress comes from `raw_response` plus the `match.*_status` columns, so a crawl that was killed resumes by fetching whatever is still `pending`.
+
+**Season crawl (`scouting sync season`, slice 1d):**
+- Syncs the match list, then processes every match with any status other than `ok`, in kickoff order. `unavailable`/`missing` matches are looked at again each run, but the negative cache means no request until the re-check date.
+- **One transaction per match.** A kill or Ctrl-C loses at most the match in progress, which is still `pending` next run. A match that fails to parse is reported and left `pending`; the season continues.
+- `--limit N` processes N matches and stops. `--renormalize` re-processes every match (use with `--offline` after a registry change; nothing is fetched).
+- Then it fetches profiles for the season's players (skipped after Ctrl-C), committing every 25 players with progress output. A Ctrl-C there keeps the finished chunks; a profile with an unexpected shape is reported and skipped.
+- `last_full_sync_at` = the latest `match.normalized_at` once nothing is pending. Deterministic, like every other timestamp.
+- **Profiles are the authority** for `name`, `short_name`, `country_code`, `shirt_number` and `listed_slot_code`; the per-match payloads only create the player.
+- `scouting report checksum` hashes every canonical table (sorted rows), so "two runs give an identical DB" is checked with one command. `scouting report formations` lists every formation in a season and any starter slot without a role.
 
 ### Search
 
@@ -196,7 +210,7 @@ percentile         peer_group_id, player_id, metric_id, basis ('per90'|'rate'|'t
 ## 7. Positions: from formation + slot to role
 
 - **Detailed roles:** `GK, CB, FB, WB, DM, CM, AM, W, ST`, plus a side (`L`/`C`/`R`) from the slot column. Low columns are the right flank (spike-verified).
-- **The slot alone doesn't decide the role.** Slots 84/86 are 10s in a 3-4-2-1, but in a 4-1-4-1 or 4-1-2-3 they're central midfielders (8s) in front of a single holding midfielder. So `formation_role` is an **explicit mapping per formation**, written by hand and reviewed, not generated by a rule. Mapping for the 8 formations seen in the spike (`row = slot // 10`; columns 2/8 etc. are flanks, low = right):
+- **The slot alone doesn't decide the role.** Slots 84/86 are 10s in a 3-4-2-1, but in a 4-1-4-1 or 4-1-2-3 they're central midfielders (8s) in front of a single holding midfielder. So `formation_role` is an **explicit mapping per formation**, written by hand and reviewed, not generated by a rule. Mapping for the 19 formations seen so far (`row = slot // 10`; columns 2/8 etc. are flanks, low = right):
 
   | Formation | GK | Defence | Midfield | Attack |
   |---|---|---|---|---|
@@ -208,9 +222,22 @@ percentile         peer_group_id, player_id, metric_id, basis ('per90'|'rate'|'t
   | 3-4-2-1 | 11 | 33/35/37 CB | 62/68 WB, 64/66 CM | 84/86 AM, 105 ST |
   | 3-4-3 | 11 | 33/35/37 CB | 72/78 WB, 74/76 CM | 103/107 W, 105 ST |
   | 5-3-2 | 11 | 33/35/37 CB, 51/59 WB | 73/75/77 CM | 104/106 ST |
+  | 3-5-2 | 11 | 33/35/37 CB | 71/79 WB, 73/75/77 CM | 104/106 ST |
+  | 5-4-1 | 11 | 33/35/37 CB, 51/59 WB | 72/78 W, 74/76 CM | 115 ST |
+  | 4-4-1-1 | 11 | 32/38 FB, 34/36 CB | 72/78 W, 74/76 CM | 95 AM, 115 ST |
+  | 3-4-1-2 | 11 | 33/35/37 CB | 62/68 WB, 64/66 CM | 85 AM, 104/106 ST |
+  | 4-1-3-2 | 11 | 32/38 FB, 34/36 CB | 65 DM; 83/87 CM | 85 AM, 104/106 ST |
+  | 4-3-2-1 | 11 | 32/38 FB, 34/36 CB | 63/65/67 CM | 84/86 AM, 115 ST |
+  | 4-5-1 | 11 | 32/38 FB, 34/36 CB | 71/79 W, 73/75/77 CM | 115 ST |
+  | 4-2-2-2 | 11 | 32/38 FB, 34/36 CB | 64/66 DM | 82/88 W, 104/106 ST |
+  | 4-3-1-2 | 11 | 32/38 FB, 34/36 CB | 63/65/67 CM | 85 AM, 104/106 ST |
+  | 3-5-1-1 | 11 | 33/35/37 CB | 71/79 WB, 73/75/77 CM | 95 AM, 115 ST |
+  | 5-3-1-1 | 11 | 33/35/37 CB, 51/59 WB | 73/75/77 CM | 95 AM, 115 ST |
+
+  The first 8 rows came from the spike; the other 11 from `report formations` after the EPL 2025/26 crawl, which covers every formation used that season (D-013).
 
   Judgement calls to check against real players in Phase 2: 4-2-3-1's 64/66 as DM rather than CM (it doesn't change the peer group, since DM and CM share one), and 3-4-2-1's 84/86 as AM rather than W.
-- **Formations not in the table:** the sync logs them, and their starters get `role = NULL` (the appearance still counts, through the broad category) until the mapping is added. It never guesses. The Phase 1 crawl lists every formation PitchAPI actually uses, so the table can be completed before Phase 2.
+- **Formations not in the table:** the sync reports them in its summary, and their starters get `role = NULL` (the appearance still counts, through the broad category) until the mapping is added. It never guesses. `scouting report formations` lists them for a season; new leagues will add more.
 - **Tests:** a table-driven test covers every (formation, slot) pair, plus known players (Frimpong 32 → FB/R, Kerkez 38 → FB/L, Wirtz 85 → AM).
 - **A player's season role:** `primary_role` is the role with the most minutes **as a starter**.
   - Fallback 1: the profile's `listed_slot_code` (formation-free rules).
@@ -261,7 +288,7 @@ Each import is a snapshot, so tracking a player over time means comparing scopes
 
 ## 10. Rough size
 
-- **Per season:** an EPL season is about 380 matches × ~31 appearances ≈ 11.8k appearances. At about 80 registry metrics that's ≈ 0.95M `stat_value` rows, roughly 25 MB with `WITHOUT ROWID` and integer metric IDs.
+- **Per season:** an EPL season is about 380 matches × ~31 appearances ≈ 11.8k appearances. At about 80 registry metrics (90 defined after slice 1d; a player gets only the ones that apply) that's ≈ 0.95M `stat_value` rows, roughly 25 MB with `WITHOUT ROWID` and integer metric IDs.
 - **Top 5 × 6 seasons:** ≈ 28M rows, about 0.7 GB. That's fine for SQLite. The UI only reads aggregates, which are smaller by a factor of ~30 per season.
 - **`raw.db`:** about 1,150 responses per league-season, gzip-compressed. Measure the size in Phase 1.
 
