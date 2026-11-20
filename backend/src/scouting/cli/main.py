@@ -8,10 +8,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from typing import Annotated
 
 import typer
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from scouting.adapters.pitchapi.cache import (
@@ -26,15 +27,30 @@ from scouting.adapters.pitchapi.raw_store import RawStore, RawStoreError
 from scouting.adapters.pitchapi.schemas import AdvancedPayload, PlayersPayload
 from scouting.config.settings import MissingApiKeyError, Settings
 from scouting.db.base import make_engine
-from scouting.db.queries import AppearanceDetail, MetricLine, appearance_detail
+from scouting.db.models import Scope
+from scouting.db.queries import (
+    AppearanceDetail,
+    MetricLine,
+    PlayerSeason,
+    SeasonStatLine,
+    appearance_detail,
+    find_players,
+    metric_by_match,
+    player_season,
+)
 from scouting.db.reports import checksum, formation_report
 from scouting.db.schema_version import SchemaOutOfDateError, check_schema_current
-from scouting.domain.positions import FORMATION_ROLES
+from scouting.domain.positions import FORMATION_ROLES, PEER_ROLES
 from scouting.ingest.match_detail import MatchDetailSummary, sync_match
 from scouting.ingest.match_list import MatchListSummary, SyncError, UpsertCounts, sync_match_list
 from scouting.ingest.profiles import ProfileSummary, sync_profiles
 from scouting.ingest.progress import Progress
 from scouting.ingest.season import SeasonSummary, find_season, sync_season
+from scouting.metrics.aggregate import (
+    AggregateError,
+    AggregateSummary,
+    aggregate_season,
+)
 from scouting.metrics.registry import BY_CODE
 
 app = typer.Typer(no_args_is_help=True, help="FM Scout backend commands.")
@@ -53,6 +69,7 @@ EXPECTED_ERRORS = (
     CacheMissError,
     RawStoreError,
     PitchApiError,
+    AggregateError,
 )
 
 OfflineOption = Annotated[
@@ -374,9 +391,17 @@ def sync_whole_season(
                 fetcher, engine, league, season,
                 limit=limit, renormalize=renormalize, on_progress=_print_progress,
             )  # fmt: skip
+            # Rebuild the season's aggregates once every match is in (D-014), so they can't
+            # go stale. A partial run (--limit, Ctrl-C, failures) leaves the old ones.
+            complete = not (summary.interrupted or summary.still_pending or summary.failed)
+            aggregated = _aggregate(engine, league, season) if complete else None
     except EXPECTED_ERRORS as exc:
         raise _fail(exc) from exc
     _print_season(summary, fetcher.stats, offline)
+    if aggregated is not None:
+        _print_aggregate(aggregated)
+    else:
+        typer.echo("  aggregates not rebuilt: the season isn't fully synced yet")
     if summary.interrupted:
         raise typer.Exit(code=130)
     if summary.failed or (summary.profiles is not None and summary.profiles.failed):
@@ -444,6 +469,147 @@ def report_checksum(
     if tables:
         for name, count in counts.items():
             typer.echo(f"  {name:<22} {count:>9}")
+
+
+# --- aggregates (slice 2a) -----------------------------------------------------------------
+
+
+def _aggregate(engine: Engine, league: str, season: str) -> AggregateSummary:
+    with Session(engine) as session, session.begin():
+        return aggregate_season(session, find_season(session, league, season).id)
+
+
+def _print_aggregate(summary: AggregateSummary) -> None:
+    typer.echo(
+        f"aggregated {summary.season}: {summary.players} players · "
+        f"{summary.stat_rows} season stat rows"
+    )
+    sizes = " · ".join(
+        f"{role} {summary.peer_roles[role]}" for role in PEER_ROLES if summary.peer_roles[role]
+    )
+    no_role = summary.peer_roles[None]
+    typer.echo(
+        f"  peer groups (≥ {summary.min_minutes} min): {sizes}"
+        + (f" · no role {no_role}" if no_role else "")
+    )
+    sources = summary.role_sources
+    typer.echo(
+        f"  roles: {sources['starts']} from starts, {sources['listed']} from listed position, "
+        f"{sources[None]} none"
+    )
+
+
+@app.command("aggregate")
+def aggregate_command(
+    league: Annotated[str, typer.Option(help="PitchAPI league ID, e.g. l_4WFCIZ.")],
+    season: Annotated[str, typer.Option(help='Season label, e.g. "2025/2026".')],
+) -> None:
+    """Rebuild a season's totals, per-90s, rates and roles from the stored matches.
+    Runs automatically after a complete `sync season`; reads scouting.db only."""
+    try:
+        with _read_engine() as engine:
+            summary = _aggregate(engine, league, season)
+    except EXPECTED_ERRORS as exc:
+        raise _fail(exc) from exc
+    _print_aggregate(summary)
+
+
+def _season_value(line: SeasonStatLine) -> tuple[str, str]:
+    """(total column, per 90 / rate column) for the season table."""
+    if line.kind == "fraction":
+        if line.value_is_rate:  # the stored total is rate x weight: only the rate means much
+            unit = "%" if line.unit == "rate" else f" {line.unit}"
+            rate = "n/a" if line.rate is None else f"{line.rate:.4g}{unit}"
+            return f"weight {_format_number(line.denominator)}", rate
+        total = f"{_format_number(line.total)} / {_format_number(line.denominator)}"
+        return total, "n/a" if line.rate is None else f"{line.rate * 100:.1f}%"
+    per90 = "n/a" if line.per90 is None else f"{line.per90:.4g}"
+    return _format_number(line.total), per90
+
+
+def _print_player_season(detail: PlayerSeason) -> None:
+    typer.echo(f"{detail.name} ({detail.external_id}) · {detail.competition} {detail.season}")
+    teams = ", ".join(f"{name} {minutes} min" for name, minutes, _ in detail.teams)
+    typer.echo(
+        f"  {detail.minutes} min · {detail.matches} matches · {detail.starts} starts · {teams}"
+    )
+    if detail.peer_role is None:
+        role = "no role (no starts, and the listed position doesn't decide one)"
+    else:
+        via = "most minutes as a starter" if detail.role_source == "starts" else "listed position"
+        role = f"{detail.primary_role or '?'} (peer group {detail.peer_role}, from {via})"
+    typer.echo(f"  role: {role}")
+    if detail.roles:
+        breakdown = ", ".join(f"{r} {m} min / {n} starts" for r, m, n in detail.roles)
+        typer.echo(f"    as a starter: {breakdown}")
+    rating = "not rated" if detail.avg_rating is None else f"{detail.avg_rating:.2f}"
+    typer.echo(f"  rating: {rating} ({detail.rated_matches} rated matches)")
+    typer.echo("")
+    typer.echo(
+        f"  {'metric':<26} {'total':<16} {'per 90 / rate':<14} {'minutes':>7} {'matches':>7}"
+    )
+    for line in detail.stats:
+        total, value = _season_value(line)
+        name = f"{line.code}{' (model)' if line.is_model_output else ''}"
+        typer.echo(f"  {name:<26} {total:<16} {value:<14} {line.minutes:>7} {line.matches:>7}")
+
+
+@inspect_app.command("player")
+def inspect_player(
+    player: Annotated[
+        str, typer.Argument(help="PitchAPI player ID (p_...) or part of a name, e.g. salah.")
+    ],
+    league: Annotated[str, typer.Option(help="PitchAPI league ID, e.g. l_4WFCIZ.")],
+    season: Annotated[str, typer.Option(help='Season label, e.g. "2025/2026".')],
+    metric: Annotated[
+        list[str] | None,
+        typer.Option(help="Only these metric codes (repeatable), e.g. --metric goals."),
+    ] = None,
+    matches: Annotated[
+        bool, typer.Option(help="With one --metric: list every match's stored value.")
+    ] = False,
+) -> None:
+    """A player's season: minutes, role, rating, and every metric's total, per 90 and rate."""
+    unknown = [code for code in metric or [] if code not in BY_CODE]
+    if unknown:
+        raise _fail(SyncError(f"unknown metric code(s): {', '.join(unknown)}"))
+    if matches and len(metric or []) != 1:
+        raise _fail(SyncError("--matches needs exactly one --metric"))
+    try:
+        with _read_engine() as engine, Session(engine) as session:
+            season_row = find_season(session, league, season)
+            scope = session.scalars(select(Scope).where(Scope.season_id == season_row.id)).first()
+            if scope is None:
+                raise SyncError(f"{season} isn't aggregated yet: run `scouting aggregate`")
+            found = find_players(session, scope.id, player)
+            if not found:
+                raise SyncError(f"no player matching {player!r} in {season}")
+            if len(found) > 1 and not any(p.external_id == player for p in found):
+                typer.echo(f"{len(found)} players match {player!r}; use a longer name or the ID:")
+                for p in found[:15]:
+                    typer.echo(f"  {p.external_id}  {p.name} ({p.minutes} min)")
+                raise typer.Exit(code=1)
+            detail = player_season(session, scope.id, found[0].player_id)
+            by_match = (
+                metric_by_match(session, season_row.id, found[0].player_id, metric[0])
+                if matches and metric
+                else []
+            )
+    except EXPECTED_ERRORS as exc:
+        raise _fail(exc) from exc
+    if detail is None:
+        raise _fail(SyncError("no aggregates for this player yet: run `scouting aggregate`"))
+    if metric:
+        detail = replace(detail, stats=[s for s in detail.stats if s.code in metric])
+    _print_player_season(detail)
+    if by_match:
+        typer.echo("")
+        typer.echo(f"  {metric[0] if metric else ''} by match (stored values):")
+        for row in by_match:
+            value = _format_number(row.value)
+            if row.denominator is not None:
+                value += f" / {_format_number(row.denominator)}"
+            typer.echo(f"    {row.match_date}  {row.match_label:<40} {row.minutes:>3} min  {value}")
 
 
 def main() -> None:  # pragma: no cover - console-script shim

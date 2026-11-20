@@ -27,6 +27,7 @@ Each entry: date, decision, why, and the alternatives that were rejected.
 - **Rejected:** Designing the FM parser before we have a sample. The format can't be verified without one.
 ## D-007 · 2026-11-18 · Hosting comes later, gated on a terms-of-use check
 - **Decision:** It will be hosted eventually on the user's website. Before deploying, confirm that PitchAPI's terms allow caching and display of their data. The review we found states no data license, and neither do the official docs (checked 2026-11-19).
+- **Update 2026-11-20:** the user is unsure whether to host at all. Local-only for now; nothing in Phases 2–6 depends on the choice.
 ## D-008 · 2026-11-19 · Repo structure: one repo, `src/` layout, layered packages
 - **Decision:**
   - One repo containing `backend/` and `frontend/`.
@@ -81,8 +82,27 @@ Each entry: date, decision, why, and the alternatives that were rejected.
   - **4-1-3-2's 83/87:** **CM** (a narrow diamond).
   - **4-3-2-1's 84/86:** **AM**, as in 3-4-2-1.
   - **5-4-1's 72/78:** **W**, following D-011 (wide midfielders go with wingers).
-- **Metrics (95 total):** `/players` keys not seen in the spike's match, all added as counts: `penalties_won`, `penalties_conceded` (all players), `penalties_missed`, `own_goals` (all players), `penalties_saved` (keepers only). Treated as "missing means 0", pending `scripts/check_new_keys.py` on the real data.
+- **Metrics (95 total):** `/players` keys not seen in the spike's match, all added as counts: `penalties_won`, `penalties_conceded` (all players), `penalties_missed`, `own_goals` (all players), `penalties_saved` (keepers only). "Missing means 0" confirmed on all 15,193 rows of the season (PITCHAPI_NOTES).
 - **Process fixes:** the profile step commits every 25 players, prints progress, handles Ctrl-C and skips a malformed profile; per-match warnings moved to DEBUG because the CLI summary already reports them once with counts.
 - **SQLite migration rule:** use plain string server defaults (`server_default="0"`), never `sa.text(...)` or `false()`. Alembic rebuilds the whole table for a SQL-expression default, and with foreign keys on, that fails once other tables reference it.
 - **Rejected:** slot 95 as ST, 4-1-3-2's 83/87 as W.
+## D-014 · 2026-11-20 · Phase 2 design: aggregation and percentile rules
+- **Aggregation (slice 2a):**
+  - **Exposure minutes per metric** = minutes of the appearances with a row for that metric. Matches without advanced analytics add no minutes to advanced metrics; keepers' minutes never count for shots.
+  - **A stored NULL** follows the registry's `season_null`: `skip` (unknown: adds no total and no minutes; `was_fouled`, the default) or `zero` (a known zero: `xgot`, NULL = no shot on target).
+  - **per90** = total ÷ exposure minutes × 90; **rate** = Σ successes ÷ Σ attempts (the exact weighted average for keeper rates). NULL when undefined.
+  - **Primary role** = most minutes as a starter (ties: more starts, then role order). No starts: the profile's listed slot, only where every mapped formation agrees on it (`role_source = 'listed'`); otherwise no role.
+  - **Rebuilt per season in one transaction**, deterministic (`computed_at` = latest `normalized_at`), so `report checksum` stays stable. Runs automatically after a `sync season` that leaves nothing pending, and on demand with `scouting aggregate`.
+- **Percentiles (slice 2b):**
+  - **Formula: midpoint.** pct = (players below + ½ × players tied) ÷ n × 100. Tied players (mostly zeros in rare-event stats) sit in the middle of their block, not at its bottom or top.
+  - **Minimum attempts per fraction metric:** below it, no percentile for that metric, and the player is flagged. Thresholds proposed in 2b for the user to adjust.
+  - **Stored raw:** low value = low percentile for every metric. The UI flips lower-is-better metrics using `higher_is_better`; style metrics (e.g. `launch_pct`, `avg_pass_length`) get a "no direction" mark so they aren't coloured good or bad.
+  - **Small peer groups:** warn below 20 players, but still show the percentiles.
+  - **Bases:** per-90 for counts, model outputs and distances; rate for fractions. No percentiles on season totals (they mostly measure minutes).
+- **Why:** Matches the scouting requirements (explicit peer group, sample size always shown, null ≠ 0), and keeps the UI from scanning `stat_value`.
+- **Rejected:**
+  - `percent_rank` (puts all tied zeros at 0th) and cumulative distribution (puts them at the top of their block, so "did nothing" can look above average).
+  - Statistical shrinkage for small samples: more accurate, but overkill for now.
+  - Storing percentiles pre-flipped: the user prefers the UI to flip.
+  - Larger peer groups by pooling leagues or seasons: adding leagues doesn't enlarge a one-league peer group by itself. Pooling the top 5 is a Phase 5 option (backlog).
  

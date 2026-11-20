@@ -9,7 +9,7 @@ Last updated: 2026-11-20. Decisions and the reasoning behind them are in [DECISI
 - **After the MVP, more leagues:** Eredivisie, Liga Portugal, MLS, Saudi Pro League, and others later. Check coverage per league first, because some leagues have no ratings or momentum.
 - **Data:** post-match only. No live data and no `/live` route.
 - **FM:** FM24 `.rtf` exports are the supported route. The `.fm` save file is a stretch goal and starts with research only.
-- **Hosting:** eventually, on the user's existing website. Check PitchAPI's terms of use before deploying.
+- **Hosting:** undecided; local-only for now. A public site needs PitchAPI's terms of use checked first (D-007).
 ## Stack (decided)
  
 | Layer | Choice |
@@ -41,7 +41,7 @@ Last updated: 2026-11-20. Decisions and the reasoning behind them are in [DECISI
 |---|---|---|---|---|
 | 0 | Spike + foundations: real requests, fixtures, coverage matrix, terms-of-use check, repo/tooling, schema draft | Endpoints and fields confirmed; canonical model approved | 6–10 | **Done 2026-11-19.** Carried over: the terms-of-use email to PitchAPI (blocks hosting only, D-007) |
 | 1 | Ingestion slice: EPL, one complete season → raw cache → canonical tables, upserts, resumable | Running twice gives an identical DB; resume works after a kill | 15–25 | **Done 2026-11-20.** EPL 2025/26 fully loaded; exit checks below all passed |
-| 2 | Aggregation + metrics engine: registry, per-90, null handling, position assignment, peer groups, percentiles | Hand-checked per-90 values match; table-driven tests pass | 15–25 | **Next:** design to propose |
+| 2 | Aggregation + metrics engine: registry, per-90, null handling, position assignment, peer groups, percentiles | Hand-checked per-90 values match; table-driven tests pass | 15–25 | **In progress.** Design approved (D-014); 2a delivered, awaiting the user's run on real data |
 | 3 | Backend API: search, player, player-season, compare, peers; provenance in every response | API contract tests pass | 6–10 | |
 | 4 | MVP UI: search, player page, radar, bars, comparison with position presets, scatter | **MVP done** | 25–40 | |
 | 5 | Breadth: EPL backfill to 2021, rest of the top 5, incremental sync, coverage badges, team pages | | 10–20 | |
@@ -67,6 +67,14 @@ Weekly hours vary and there's no target date. Track progress by phase, not by ca
 2. **Resume:** Ctrl-C mid-crawl, then re-run: continued where it stopped; the match in progress was rolled back and refetched.
 3. **Idempotent:** `report checksum` identical before and after a second `--offline --renormalize` (`8223b37e…246e`).
 4. **Roles:** `report formations`: 19 formations, every starter has a role.
+### Phase 2 slices (design: D-014)
+ 
+| Slice | Builds | Done when | Status |
+|---|---|---|---|
+| 2a | Tables `scope`, `player_scope`, `player_scope_team`, `player_scope_role`, `player_scope_stat`; season totals, exposure minutes, per-90s, rates, primary role (starts, then listed slot); `scouting aggregate` (also automatic after a complete `sync season`); `scouting inspect player` (season view, `--matches` for hand checks) | Per-90s for 3–4 real players checked by hand against their per-match rows | **Code delivered** 2026-11-20 (342 tests in the workspace). Migration: 5 new tables (user generates). Next: run on EPL 2025/26 + hand check |
+| 2b | `peer_group` + `percentile` tables; midpoint percentiles on per-90/rate; minimum attempts per fraction metric (thresholds to approve); small-group warning (< 20); "no direction" mark for style metrics; `scouting report peers` | Table-driven tests pass; rankings look right for known players | |
+| 2c | Data checks: `was_fouled` null vs opponents' fouls, `launch_pct` definition, role judgement calls against real players, xA vs xAG choice | Open questions below closed | |
+ 
 ## Crawl order
  
 1. ~~EPL, one complete season (2025-26), as the Phase 1 slice.~~ Done.
@@ -96,16 +104,17 @@ Verified details are in [PITCHAPI_NOTES.md](PITCHAPI_NOTES.md).
 - **Metric list and overlap sources:** D-012, D-013.
 - **Every formation in EPL 2025/26:** 19, all mapped (D-013). Other leagues may add more; `report formations` shows them.
 - **Penalty/own-goal keys:** sent only when ≥ 1, so missing = 0; own goals aren't in `goals` (crawl, PITCHAPI_NOTES).
+- **Aggregation and percentile rules:** D-014.
 **Still open:**
-- **Role judgement calls** (4-2-3-1's 64/66 as DM; 3-4-2-1's 84/86 as AM; slot 95 as AM): check against real players in Phase 2.
-- **xA vs xAG for the radars:** both stored; the user picks in Phase 2/4.
-- **`launch_pct` definition:** check whether it equals launches / distributions in Phase 2.
+- **Role judgement calls** (4-2-3-1's 64/66 as DM; 3-4-2-1's 84/86 as AM; slot 95 as AM): check against real players in 2c.
+- **xA vs xAG for the radars:** both stored; the user picks in 2c or Phase 4.
+- **`launch_pct` definition:** check whether it equals launches / distributions in 2c.
 - **Late analytics.** Can advanced analytics appear later for a match that first returned `ANALYTICS_UNAVAILABLE`? None in EPL 2025/26; watch other leagues.
-- **`was_fouled` null.** Does it mean 0? Check against the opponents' `fouls` in Phase 2.
+- **`was_fouled` null.** Does it mean 0? Check against the opponents' `fouls` in 2c. Until then it's treated as unknown in season totals (D-014).
 - **Terms of use for caching and redistribution.** Not in the docs. Ask PitchAPI support. Must be answered before hosting.
 **Known cosmetic issue:** the progress line's time estimate is too low early on when part of the work comes from cache. Not worth fixing now.
  
 ## Backlog (post-MVP ideas)
  
-- (empty)
+- **Pooled peer groups** (Phase 5): one peer group per role across the top 5 leagues, or across several seasons of one league, for larger samples (D-014).
  

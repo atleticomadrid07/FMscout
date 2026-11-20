@@ -29,6 +29,12 @@ ABSENCE_POLICIES: Final[tuple[AbsencePolicy, ...]] = ("zero", "null", "fraction_
 AGGREGATIONS: Final[tuple[Aggregation, ...]] = ("sum", "rate_from_sums")
 APPLIES_TO: Final[tuple[AppliesTo, ...]] = ("all", "outfield", "gk")
 
+# How a stored NULL value counts in season totals (Phase 2):
+# - "skip": unknown. The match adds nothing to the total or to the metric's minutes.
+# - "zero": a known zero the provider sends as null (xGOT with no shot on target). The
+#   match adds 0 to the total and its minutes count.
+SeasonNull = Literal["skip", "zero"]
+
 
 @dataclass(frozen=True, slots=True)
 class MetricDef:
@@ -49,6 +55,7 @@ class MetricDef:
     # season. With value_is_rate, the stored value is rate x weight (`denominator_key`),
     # so rate_from_sums gives the exact weighted average later.
     value_is_rate: bool = False
+    season_null: SeasonNull = "skip"
 
     @property
     def is_fraction(self) -> bool:
@@ -108,6 +115,7 @@ def _model(
     *,
     absence: AbsencePolicy = "zero",
     lower_is_better: bool = False,
+    season_null: SeasonNull = "skip",
 ) -> MetricDef:
     return MetricDef(
         code,
@@ -120,6 +128,7 @@ def _model(
         desc,
         unit=unit,
         higher_is_better=not lower_is_better,
+        season_null=season_null,
     )
 
 
@@ -183,8 +192,9 @@ REGISTRY: Final[tuple[MetricDef, ...]] = (
     _model("xa", "xA", _P, "expected_assists", "outfield",
            "Expected assists from /players (PitchAPI's model). See also xag.", "xA"),
     _model("xgot", "xGOT", _P, "expected_goals_on_target_variant", "outfield",
-           "Expected goals on target. NULL when the player had no shot on target.", "xG",
-           absence="null"),
+           "Expected goals on target. NULL when the player had no shot on target, which "
+           "counts as 0 in season totals.", "xG",
+           absence="null", season_null="zero"),
     _fraction("passes_completed", "Passes completed", _P, "accurate_passes", "all",
               "Accurate passes out of attempted passes."),
     _fraction("crosses_completed", "Crosses completed", _P, "accurate_crosses", "outfield",

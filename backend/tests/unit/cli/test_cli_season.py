@@ -102,3 +102,80 @@ def test_sync_profiles_offline(seeded: None) -> None:
     result = invoke("sync", "profiles", "--offline")
     assert result.exit_code == 0, result.output
     assert "profiles: 14 players · 0 updated, 14 unchanged" in result.output
+
+
+# --- aggregates (slice 2a) ------------------------------------------------------------------
+
+
+def test_complete_season_sync_rebuilds_aggregates(seeded: None) -> None:
+    result = invoke("sync", "season", *SEASON_ARGS, "--offline")
+    assert "aggregated 2025/2026: 14 players" in result.output
+    assert "peer groups (≥ 45 min): GK 4 · FB 2 · AM 2 · ST 2" in result.output
+    assert "roles: 10 from starts, 2 from listed position, 2 none" in result.output
+
+
+def test_partial_sync_leaves_aggregates_alone(seeded: None) -> None:
+    result = invoke("sync", "season", *SEASON_ARGS, "--offline", "--limit", "1")
+    assert "aggregated" not in result.output
+    assert "aggregates not rebuilt: the season isn't fully synced yet" in result.output
+
+
+def test_aggregate_command_is_repeatable(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    before = invoke("report", "checksum").output
+    result = invoke("aggregate", *SEASON_ARGS)
+    assert result.exit_code == 0, result.output
+    assert "aggregated 2025/2026: 14 players" in result.output
+    assert invoke("report", "checksum").output == before
+
+
+def test_inspect_player_shows_the_season(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    result = invoke("inspect", "player", "p_CST01", *SEASON_ARGS, "--metric", "goals")
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert "156 min · 2 matches · 2 starts" in lines[1]
+    assert "role: ST (peer group ST, from most minutes as a starter)" in result.output
+    goals = next(line.split() for line in lines if line.strip().startswith("goals"))
+    assert goals == ["goals", "2", "1.154", "156", "2"]
+
+
+def test_inspect_player_fractions_and_weighted_rates(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    result = invoke(
+        "inspect", "player", "p_CGK01", *SEASON_ARGS,
+        "--metric", "passes_completed", "--metric", "distribution_accuracy",
+    )  # fmt: skip
+    assert "passes_completed" in result.output and "40 / 56" in result.output
+    assert "71.4%" in result.output
+    assert "weight 60" in result.output and "80%" in result.output
+
+
+def test_inspect_player_by_match_for_hand_checks(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    result = invoke("inspect", "player", "p_CST01", *SEASON_ARGS, "--metric", "goals", "--matches")
+    assert result.exit_code == 0, result.output
+    by_match = [line for line in result.output.splitlines() if " min  " in line]
+    assert len(by_match) == 2 and all(line.rstrip().endswith("78 min  1") for line in by_match)
+
+
+def test_inspect_player_ambiguous_name_lists_candidates(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    # The fixture's teams reuse names, so a name can match players on two teams.
+    result = invoke("inspect", "player", "STRIKER", *SEASON_ARGS)  # case doesn't matter
+    assert result.exit_code == 1
+    assert "2 players match 'STRIKER'" in result.output
+    lines = result.output.splitlines()
+    assert "p_CST01" in lines[1] and "p_AST01" in lines[2]  # most minutes first
+
+
+def test_inspect_player_before_aggregating_explains(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline", "--limit", "1")
+    result = invoke("inspect", "player", "striker", *SEASON_ARGS)
+    assert result.exit_code == 1
+    assert "run `scouting aggregate`" in result.output
+
+
+def test_inspect_player_rejects_unknown_metrics(seeded: None) -> None:
+    result = invoke("inspect", "player", "x", *SEASON_ARGS, "--metric", "nope")
+    assert result.exit_code == 1 and "unknown metric code(s): nope" in result.output

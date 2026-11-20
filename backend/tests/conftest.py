@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from sqlalchemy import Engine, select
 
+from scouting.adapters.pitchapi.cache import CachedFetcher
+from scouting.adapters.pitchapi.client import ApiResponse
+from scouting.adapters.pitchapi.raw_store import RawStore
 from scouting.db import models  # noqa: F401  (registers every table on Base.metadata)
 from scouting.db.base import Base, make_engine
+from scouting.ingest.season import sync_season
 
 PITCHAPI_FIXTURES = Path(__file__).parent / "fixtures" / "pitchapi"
 
@@ -112,3 +117,28 @@ def season_responses(load_fixture: LoadFixture) -> SeasonResponses:
             "image_url": None,
         }
     return responses
+
+
+class _SeasonApi:
+    """Serves the fixture season; every response is fetched at FIXTURE_FETCHED_AT."""
+
+    def __init__(self, responses: SeasonResponses) -> None:
+        self.responses = responses
+
+    def get(self, path: str, params: Mapping[str, str] | None = None) -> ApiResponse:
+        return ApiResponse(
+            path=path, params=dict(params or {}), status=200, data=self.responses[path],
+            error_code=None, error_message=None, fetched_at=FIXTURE_FETCHED_AT,
+        )  # fmt: skip
+
+
+FIXTURE_FETCHED_AT = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def synced_season(db_engine: Engine, tmp_path: Path, season_responses: SeasonResponses) -> Engine:
+    """db_engine with the whole three-match fixture season synced (profiles included)."""
+    with RawStore(tmp_path / "season_raw.db") as store:
+        fetcher = CachedFetcher(store, _SeasonApi(season_responses), now=lambda: FIXTURE_FETCHED_AT)
+        sync_season(fetcher, db_engine, "l_FIXT01", "2025/2026")
+    return db_engine

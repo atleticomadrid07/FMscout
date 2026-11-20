@@ -16,6 +16,7 @@ from typing import Final, Literal
 Role = Literal["GK", "CB", "FB", "WB", "DM", "CM", "AM", "W", "ST"]
 Side = Literal["L", "C", "R"]
 PeerRole = Literal["GK", "CB", "FB", "CM", "AM", "W", "ST"]
+PEER_ROLES: Final[tuple[PeerRole, ...]] = ("GK", "CB", "FB", "CM", "AM", "W", "ST")
 
 ROLES: Final[tuple[Role, ...]] = ("GK", "CB", "FB", "WB", "DM", "CM", "AM", "W", "ST")
 SIDES: Final[tuple[Side, ...]] = ("L", "C", "R")
@@ -204,3 +205,20 @@ def formation_role_rows() -> list[tuple[str, int, Role, Side]]:
         for formation, slots in FORMATION_ROLES.items()
         for slot, role in slots.items()
     ]
+
+
+def listed_slot_roles(slot_code: int | None) -> tuple[Role | None, PeerRole | None]:
+    """Fallback role for a player with no starts, from the profile's listed slot (SCHEMA §7).
+
+    Formation-free: a slot counts only as far as every mapped formation agrees on it. 64/66
+    is DM in a 4-2-3-1 but CM in a 3-4-2-1, so the role is unknown but the peer role is CM.
+    84/86 is AM in some formations and CM in others, so both are unknown. Broad categories
+    (0-3) and unmapped slots give nothing.
+    """
+    if slot_code is None:
+        return None, None
+    roles = {slots[slot_code] for slots in FORMATION_ROLES.values() if slot_code in slots}
+    peers = {PEER_ROLE[role] for role in roles}
+    role = next(iter(roles)) if len(roles) == 1 else None
+    peer = next(iter(peers)) if len(peers) == 1 else None
+    return role, peer

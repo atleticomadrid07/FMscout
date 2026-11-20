@@ -20,7 +20,6 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
-from unidecode import unidecode
 
 from scouting.adapters.pitchapi.cache import FINISHED_MATCH, CachedFetcher
 from scouting.adapters.pitchapi.client import build_path
@@ -47,6 +46,7 @@ from scouting.db.models import (
 from scouting.db.models import (
     StatValue as StatValueRow,
 )
+from scouting.domain.names import search_name
 from scouting.domain.positions import GK_SLOT, SUB_CATEGORY_GK, role_for
 from scouting.ingest.match_list import SOURCE, SyncError, UpsertCounts
 from scouting.ingest.reference_data import sync_reference_data
@@ -81,11 +81,6 @@ class _LineupInfo:
 
 
 # --- helpers ------------------------------------------------------------------------------------
-
-
-def search_name(name: str) -> str:
-    """Accent-free, lowercased form for the search index: "Miloš Kerkez" → "milos kerkez"."""
-    return " ".join(unidecode(name).lower().split())
 
 
 def _number(raw: Any, *, where: str) -> float | None:

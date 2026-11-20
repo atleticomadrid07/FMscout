@@ -1,6 +1,6 @@
-"""Canonical tables (SCHEMA.md §4-§5). Slice 1b: competitions, seasons, teams, matches,
+"""Canonical tables (SCHEMA.md §4-§6). Slice 1b: competitions, seasons, teams, matches,
 their source-ID maps, and sync state. Slice 1c: players, appearances, metrics, stat values
-and formation roles.
+and formation roles. Slice 2a: aggregate scopes and per-player season totals.
 
 Conventions:
 - Internal INTEGER surrogate keys everywhere; external IDs live only in *_source_id.
@@ -18,7 +18,7 @@ from sqlalchemy import CheckConstraint, ForeignKey, Index, String, UniqueConstra
 from sqlalchemy.orm import Mapped, mapped_column
 
 from scouting.db.base import Base
-from scouting.domain.positions import ROLES, SIDES
+from scouting.domain.positions import PEER_ROLES, ROLES, SIDES
 from scouting.metrics.registry import ABSENCE_POLICIES, AGGREGATIONS, APPLIES_TO
 from scouting.metrics.registry import KINDS as METRIC_KINDS
 from scouting.metrics.registry import SOURCES as METRIC_SOURCES
@@ -27,6 +27,8 @@ SOURCES: Final = ("pitchapi", "fm24")
 PLAYER_ORIGINS: Final = ("real", "fm")
 FETCH_STATUSES: Final = ("pending", "ok", "missing")
 ADVANCED_STATUSES: Final = ("pending", "ok", "unavailable")
+SCOPE_KINDS: Final = ("season", "fm_import")
+ROLE_SOURCES: Final = ("starts", "listed")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -288,3 +290,124 @@ class FormationRole(Base):
     slot_code: Mapped[int] = mapped_column(primary_key=True)
     role: Mapped[str] = mapped_column(String(4))
     side: Mapped[str] = mapped_column(String(1))
+
+
+# --- aggregates (Phase 2, slice 2a; SCHEMA §6) -----------------------------------------------
+#
+# Rebuilt per scope in one transaction (delete, then insert) by scouting.metrics.aggregate.
+# Nothing here is edited by hand, and nothing reads stat_value at request time.
+
+
+class Scope(Base):
+    """What an aggregate is computed over: one competition-season, or (Phase 6) one FM import.
+    Real seasons and FM snapshots share the aggregate tables through this."""
+
+    __tablename__ = "scope"
+    __table_args__ = (
+        CheckConstraint(_in("kind", SCOPE_KINDS), name="kind"),
+        CheckConstraint(
+            "(kind = 'season' AND season_id IS NOT NULL AND fm_import_id IS NULL)"
+            " OR (kind = 'fm_import' AND fm_import_id IS NOT NULL AND season_id IS NULL)",
+            name="one_target",
+        ),
+        UniqueConstraint("season_id"),
+        UniqueConstraint("fm_import_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("season.id", ondelete="CASCADE"))
+    fm_import_id: Mapped[int | None]  # FK to fm_import once that table exists (Phase 6)
+
+
+class PlayerScope(Base):
+    """One player's season (or FM snapshot): minutes, role and rating."""
+
+    __tablename__ = "player_scope"
+    __table_args__ = (
+        CheckConstraint(
+            f"primary_role IS NULL OR {_in('primary_role', ROLES)}", name="primary_role"
+        ),
+        CheckConstraint(f"peer_role IS NULL OR {_in('peer_role', PEER_ROLES)}", name="peer_role"),
+        CheckConstraint(
+            f"role_source IS NULL OR {_in('role_source', ROLE_SOURCES)}", name="role_source"
+        ),
+        Index(None, "scope_id", "peer_role"),
+    )
+
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    scope_id: Mapped[int] = mapped_column(
+        ForeignKey("scope.id", ondelete="CASCADE"), primary_key=True
+    )
+    minutes: Mapped[int]  # all appearances, canonical minutes (D-010)
+    matches: Mapped[int]
+    starts: Mapped[int]
+    primary_role: Mapped[str | None] = mapped_column(String(4))
+    peer_role: Mapped[str | None] = mapped_column(String(4))
+    # 'starts': most minutes as a starter. 'listed': no starts, from the profile's listed
+    # slot where every formation agrees. NULL: neither gave a role.
+    role_source: Mapped[str | None] = mapped_column(String(8))
+    avg_rating: Mapped[float | None]  # mean over rated matches only
+    rated_matches: Mapped[int]
+    computed_at: Mapped[datetime]  # latest normalized_at of the scope's matches: deterministic
+
+
+class PlayerScopeTeam(Base):
+    """Minutes per team inside one scope (a mid-season move within a competition)."""
+
+    __tablename__ = "player_scope_team"
+
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    scope_id: Mapped[int] = mapped_column(
+        ForeignKey("scope.id", ondelete="CASCADE"), primary_key=True
+    )
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.id"), primary_key=True)
+    minutes: Mapped[int]
+    matches: Mapped[int]
+
+
+class PlayerScopeRole(Base):
+    """Minutes as a starter in each detailed role: shows how primary_role was chosen."""
+
+    __tablename__ = "player_scope_role"
+    __table_args__ = (CheckConstraint(_in("role", ROLES), name="role"),)
+
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    scope_id: Mapped[int] = mapped_column(
+        ForeignKey("scope.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(String(4), primary_key=True)
+    minutes: Mapped[int]
+    starts: Mapped[int]
+
+
+class PlayerScopeStat(Base):
+    """One metric over one scope. `minutes` is this metric's exposure: the minutes of the
+    appearances that counted for it, not the player's total (SCHEMA §6)."""
+
+    __tablename__ = "player_scope_stat"
+    __table_args__ = (
+        CheckConstraint("minutes >= 0", name="minutes"),
+        Index(None, "scope_id", "metric_id"),
+        {"sqlite_with_rowid": False},
+    )
+
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    scope_id: Mapped[int] = mapped_column(
+        ForeignKey("scope.id", ondelete="CASCADE"), primary_key=True
+    )
+    metric_id: Mapped[int] = mapped_column(ForeignKey("metric.id"), primary_key=True)
+    total: Mapped[float | None]  # successes for fractions; NULL = nothing known
+    denominator: Mapped[float | None]  # attempts (or weight), fractions only
+    minutes: Mapped[int]
+    matches_with_value: Mapped[int]
+    per90: Mapped[float | None]  # counts, model outputs, distances; NULL when minutes = 0
+    rate: Mapped[float | None]  # fractions: total / denominator; NULL when denominator = 0
