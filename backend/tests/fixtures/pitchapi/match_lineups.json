@@ -1,0 +1,87 @@
+{
+  "_note": "HAND-MADE TEST FIXTURE, not real PitchAPI data. Shaped like the real /v1/matches/{id}/lineups `data` payload (Phase 0 spike, 2026-11-19). Match m_FIXT01 from match_list.json; player names are invented.",
+  "data": {
+    "home": {
+      "formation": "4-2-3-1",
+      "coach": {
+        "name": "Fixture Coach A"
+      },
+      "starters": [
+        {
+          "player_id": "p_FXGK01",
+          "name": "Ada Keeper",
+          "position_id": 11,
+          "pitch_x": 0.1,
+          "pitch_y": 0.5
+        },
+        {
+          "player_id": "p_FXLB01",
+          "name": "Bea Fullbäck",
+          "position_id": 38,
+          "pitch_x": 0.29,
+          "pitch_y": 0.13
+        },
+        {
+          "player_id": "p_FXST01",
+          "name": "Cal Striker",
+          "position_id": 115,
+          "pitch_x": 0.87,
+          "pitch_y": 0.5
+        }
+      ],
+      "subs": [
+        {
+          "player_id": "p_FXSB01",
+          "name": "Dev Sub",
+          "position_id": 2,
+          "pitch_x": 0.0,
+          "pitch_y": 0.0
+        },
+        {
+          "player_id": "p_FXUN01",
+          "name": "Eli Bench",
+          "position_id": 3,
+          "pitch_x": 0.0,
+          "pitch_y": 0.0
+        }
+      ]
+    },
+    "away": {
+      "formation": "3-4-2-1",
+      "coach": {
+        "name": "Fixture Coach B"
+      },
+      "starters": [
+        {
+          "player_id": "p_FXGK02",
+          "name": "Fay Keeper",
+          "position_id": 11,
+          "pitch_x": 0.1,
+          "pitch_y": 0.5
+        },
+        {
+          "player_id": "p_FXAM01",
+          "name": "Gus Ten",
+          "position_id": 84,
+          "pitch_x": 0.68,
+          "pitch_y": 0.7
+        }
+      ],
+      "subs": [
+        {
+          "player_id": "p_FXGK03",
+          "name": "Hal Backup",
+          "position_id": 0,
+          "pitch_x": 0.0,
+          "pitch_y": 0.0
+        }
+      ]
+    },
+    "home_team": {
+      "id": "t_FIXTA1"
+    },
+    "away_team": {
+      "id": "t_FIXTB2"
+    }
+  }
+}

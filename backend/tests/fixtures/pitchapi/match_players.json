@@ -1,0 +1,611 @@
+{
+  "_note": "HAND-MADE TEST FIXTURE, not real PitchAPI data. Shaped like the real /v1/matches/{id}/players `data` payload (Phase 0 spike, 2026-11-19). Match m_FIXT01 from match_list.json; player names are invented.",
+  "data": [
+    {
+      "player": {
+        "id": "p_FXGK01",
+        "name": "Ada Keeper",
+        "position_id": null,
+        "image_url": null
+      },
+      "team_id": "t_FIXTA1",
+      "stats": [
+        {
+          "key": "top_stats",
+          "title": "Top stats",
+          "stats": {
+            "Minutes played": {
+              "key": "minutes_played",
+              "stat": {
+                "type": "integer",
+                "value": 90
+              }
+            },
+            "Rating": {
+              "key": "rating_title",
+              "stat": {
+                "type": "double",
+                "value": 7.2
+              }
+            },
+            "Saves": {
+              "key": "saves",
+              "stat": {
+                "type": "integer",
+                "value": 3
+              }
+            },
+            "Goals conceded": {
+              "key": "goals_conceded",
+              "stat": {
+                "type": "integer",
+                "value": 1
+              }
+            },
+            "Accurate passes": {
+              "key": "accurate_passes",
+              "stat": {
+                "type": "fractionWithPercentage",
+                "value": 20,
+                "total": 28
+              }
+            },
+            "Tackles": {
+              "key": "matchstats.headers.tackles",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            },
+            "Shotmap": {
+              "key": "",
+              "stat": {
+                "type": "boolean",
+                "value": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "player": {
+        "id": "p_FXLB01",
+        "name": "Bea Fullbäck",
+        "position_id": null,
+        "image_url": "https://example.invalid/p/lb.webp"
+      },
+      "team_id": "t_FIXTA1",
+      "stats": [
+        {
+          "key": "top_stats",
+          "title": "Top stats",
+          "stats": {
+            "Minutes played": {
+              "key": "minutes_played",
+              "stat": {
+                "type": "integer",
+                "value": 90
+              }
+            },
+            "Rating": {
+              "key": "rating_title",
+              "stat": {
+                "type": "double",
+                "value": 6.8
+              }
+            },
+            "Goals": {
+              "key": "goals",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            },
+            "Assists": {
+              "key": "assists",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            },
+            "Accurate passes": {
+              "key": "accurate_passes",
+              "stat": {
+                "type": "fractionWithPercentage",
+                "value": 40,
+                "total": 50
+              }
+            },
+            "Chances created": {
+              "key": "chances_created",
+              "stat": {
+                "type": "integer",
+                "value": 1
+              }
+            },
+            "Defensive actions": {
+              "key": "defensive_actions",
+              "stat": {
+                "type": "integer",
+                "value": 5
+              }
+            },
+            "Shotmap": {
+              "key": "",
+              "stat": {
+                "type": "boolean",
+                "value": 0
+              }
+            }
+          }
+        },
+        {
+          "key": "attack",
+          "title": "Attack",
+          "stats": {
+            "Accurate crosses": {
+              "key": "accurate_crosses",
+              "stat": {
+                "type": "fractionWithPercentage",
+                "value": 1,
+                "total": 3
+              }
+            },
+            "Dispossessed": {
+              "key": "dispossessed",
+              "stat": {
+                "type": "integer",
+                "value": 1
+              }
+            }
+          }
+        },
+        {
+          "key": "defense",
+          "title": "Defense",
+          "stats": {
+            "Tackles": {
+              "key": "matchstats.headers.tackles",
+              "stat": {
+                "type": "integer",
+                "value": 2
+              }
+            },
+            "Defensive actions": {
+              "key": "defensive_actions",
+              "stat": {
+                "type": "integer",
+                "value": 5
+              }
+            }
+          }
+        },
+        {
+          "key": "duels",
+          "title": "Duels",
+          "stats": {
+            "Was fouled": {
+              "key": "was_fouled",
+              "stat": {
+                "type": "integer",
+                "value": null
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "player": {
+        "id": "p_FXST01",
+        "name": "Cal Striker",
+        "position_id": null,
+        "image_url": null
+      },
+      "team_id": "t_FIXTA1",
+      "stats": [
+        {
+          "key": "top_stats",
+          "title": "Top stats",
+          "stats": {
+            "Minutes played": {
+              "key": "minutes_played",
+              "stat": {
+                "type": "integer",
+                "value": 78
+              }
+            },
+            "Rating": {
+              "key": "rating_title",
+              "stat": {
+                "type": "double",
+                "value": 7.9
+              }
+            },
+            "Goals": {
+              "key": "goals",
+              "stat": {
+                "type": "integer",
+                "value": 1
+              }
+            },
+            "Assists": {
+              "key": "assists",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            },
+            "Total shots": {
+              "key": "total_shots",
+              "stat": {
+                "type": "integer",
+                "value": 3
+              }
+            },
+            "Shots on target": {
+              "key": "ShotsOnTarget",
+              "stat": {
+                "type": "integer",
+                "value": 2
+              }
+            },
+            "Expected goals (xG)": {
+              "key": "expected_goals",
+              "stat": {
+                "type": "double",
+                "value": 0.84
+              }
+            },
+            "Expected goals on target (xGOT)": {
+              "key": "expected_goals_on_target_variant",
+              "stat": {
+                "type": "double",
+                "value": 0.91
+              }
+            },
+            "Accurate passes": {
+              "key": "accurate_passes",
+              "stat": {
+                "type": "fractionWithPercentage",
+                "value": 12,
+                "total": 18
+              }
+            },
+            "Shotmap": {
+              "key": "",
+              "stat": {
+                "type": "boolean",
+                "value": 0
+              }
+            }
+          }
+        },
+        {
+          "key": "attack",
+          "title": "Attack",
+          "stats": {
+            "xG non-penalty": {
+              "key": "expected_goals_non_penalty",
+              "stat": {
+                "type": "double",
+                "value": 0.84
+              }
+            },
+            "Successful dribbles": {
+              "key": "dribbles_succeeded",
+              "stat": {
+                "type": "fractionWithPercentage",
+                "value": 2,
+                "total": 4
+              }
+            }
+          }
+        },
+        {
+          "key": "defense",
+          "title": "Defense",
+          "stats": {
+            "Tackles": {
+              "key": "matchstats.headers.tackles",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            }
+          }
+        },
+        {
+          "key": "duels",
+          "title": "Duels",
+          "stats": {
+            "Was fouled": {
+              "key": "was_fouled",
+              "stat": {
+                "type": "integer",
+                "value": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "player": {
+        "id": "p_FXSB01",
+        "name": "Dev Sub",
+        "position_id": null,
+        "image_url": null
+      },
+      "team_id": "t_FIXTA1",
+      "stats": [
+        {
+          "key": "top_stats",
+          "title": "Top stats",
+          "stats": {
+            "Minutes played": {
+              "key": "minutes_played",
+              "stat": {
+                "type": "integer",
+                "value": 12
+              }
+            },
+            "Rating": {
+              "key": "rating_title",
+              "stat": {
+                "type": "double",
+                "value": 6.5
+              }
+            },
+            "Goals": {
+              "key": "goals",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            },
+            "Assists": {
+              "key": "assists",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            },
+            "Accurate passes": {
+              "key": "accurate_passes",
+              "stat": {
+                "type": "fractionWithPercentage",
+                "value": 5,
+                "total": 6
+              }
+            },
+            "Tackles": {
+              "key": "matchstats.headers.tackles",
+              "stat": {
+                "type": "integer",
+                "value": 1
+              }
+            },
+            "Was fouled": {
+              "key": "was_fouled",
+              "stat": {
+                "type": "integer",
+                "value": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "player": {
+        "id": "p_FXUN01",
+        "name": "Eli Bench",
+        "position_id": null,
+        "image_url": null
+      },
+      "team_id": "t_FIXTA1",
+      "stats": []
+    },
+    {
+      "player": {
+        "id": "p_FXGK02",
+        "name": "Fay Keeper",
+        "position_id": null,
+        "image_url": null
+      },
+      "team_id": "t_FIXTB2",
+      "stats": [
+        {
+          "key": "top_stats",
+          "title": "Top stats",
+          "stats": {
+            "Minutes played": {
+              "key": "minutes_played",
+              "stat": {
+                "type": "integer",
+                "value": 90
+              }
+            },
+            "Rating": {
+              "key": "rating_title",
+              "stat": {
+                "type": "double",
+                "value": 6.4
+              }
+            },
+            "Saves": {
+              "key": "saves",
+              "stat": {
+                "type": "integer",
+                "value": 1
+              }
+            },
+            "Accurate passes": {
+              "key": "accurate_passes",
+              "stat": {
+                "type": "fractionWithPercentage",
+                "value": 25,
+                "total": 30
+              }
+            },
+            "Tackles": {
+              "key": "matchstats.headers.tackles",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "player": {
+        "id": "p_FXAM01",
+        "name": "Gus Ten",
+        "position_id": null,
+        "image_url": null
+      },
+      "team_id": "t_FIXTB2",
+      "stats": [
+        {
+          "key": "top_stats",
+          "title": "Top stats",
+          "stats": {
+            "Minutes played": {
+              "key": "minutes_played",
+              "stat": {
+                "type": "integer",
+                "value": 90
+              }
+            },
+            "Rating": {
+              "key": "rating_title",
+              "stat": {
+                "type": "double",
+                "value": 7.0
+              }
+            },
+            "Goals": {
+              "key": "goals",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            },
+            "Assists": {
+              "key": "assists",
+              "stat": {
+                "type": "integer",
+                "value": 1
+              }
+            },
+            "Expected assists (xA)": {
+              "key": "expected_assists",
+              "stat": {
+                "type": "double",
+                "value": 0.35
+              }
+            },
+            "Accurate passes": {
+              "key": "accurate_passes",
+              "stat": {
+                "type": "fractionWithPercentage",
+                "value": 30,
+                "total": 36
+              }
+            },
+            "Defensive actions": {
+              "key": "defensive_actions",
+              "stat": {
+                "type": "integer",
+                "value": 2
+              }
+            }
+          }
+        },
+        {
+          "key": "defense",
+          "title": "Defense",
+          "stats": {
+            "Tackles": {
+              "key": "matchstats.headers.tackles",
+              "stat": {
+                "type": "integer",
+                "value": 1
+              }
+            },
+            "Defensive actions": {
+              "key": "defensive_actions",
+              "stat": {
+                "type": "integer",
+                "value": 2
+              }
+            }
+          }
+        },
+        {
+          "key": "duels",
+          "title": "Duels",
+          "stats": {
+            "Was fouled": {
+              "key": "was_fouled",
+              "stat": {
+                "type": "integer",
+                "value": 3
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "player": {
+        "id": "p_FXGK03",
+        "name": "Hal Backup",
+        "position_id": null,
+        "image_url": null
+      },
+      "team_id": "t_FIXTB2",
+      "stats": [
+        {
+          "key": "top_stats",
+          "title": "Top stats",
+          "stats": {
+            "Minutes played": {
+              "key": "minutes_played",
+              "stat": {
+                "type": "integer",
+                "value": 5
+              }
+            },
+            "Saves": {
+              "key": "saves",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            },
+            "Accurate passes": {
+              "key": "accurate_passes",
+              "stat": {
+                "type": "fractionWithPercentage",
+                "value": 2,
+                "total": 2
+              }
+            },
+            "Tackles": {
+              "key": "matchstats.headers.tackles",
+              "stat": {
+                "type": "integer",
+                "value": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
