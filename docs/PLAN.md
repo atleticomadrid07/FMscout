@@ -1,6 +1,6 @@
 # PLAN.md: Dual Soccer + FM Scouting Tool
 
-Last updated: 2026-11-19. Decisions and the reasoning behind them are in [DECISIONS.md](../DECISIONS.md).
+Last updated: 2026-11-19. Decisions and the reasoning behind them are in [DECISIONS.md](../DECISIONS.md). The approved data model is in [SCHEMA.md](SCHEMA.md).
 
 ## Scope
 
@@ -20,7 +20,7 @@ Last updated: 2026-11-19. Decisions and the reasoning behind them are in [DECISI
 | Stats | pandas |
 | Search | SQLite FTS5 + rapidfuzz + unidecode |
 | Sync jobs | Typer CLI that runs separately from the web app |
-| PitchAPI client | Official Python SDK, wrapped by our own cache layer (see D-004) |
+| PitchAPI client | Our own httpx client returning raw JSON (D-009), wrapped by our own cache layer (D-004) |
 | Frontend | Vite + React + strict TypeScript, TanStack Query |
 | Charts | Decided at Phase 4. Candidates: ECharts, Plotly, Recharts. Pitch visuals will probably be custom SVG/D3 |
 | Tests | pytest + hypothesis; Vitest |
@@ -40,8 +40,8 @@ Last updated: 2026-11-19. Decisions and the reasoning behind them are in [DECISI
 
 | # | Phase | Exit criteria | Est. h | Status |
 |---|---|---|---|---|
-| 0 | Spike + foundations: real requests, fixtures, coverage matrix, terms-of-use check, repo/tooling, schema draft | Endpoints and fields confirmed; canonical model approved | 6–10 | In progress (design) |
-| 1 | Ingestion slice: EPL, one complete season → raw cache → canonical tables, upserts, resumable | Running twice gives an identical DB; resume works after a kill | 15–25 | |
+| 0 | Spike + foundations: real requests, fixtures, coverage matrix, terms-of-use check, repo/tooling, schema draft | Endpoints and fields confirmed; canonical model approved | 6–10 | **Done 2026-11-19.** Carried over: the terms-of-use email to PitchAPI (blocks hosting only, D-007) |
+| 1 | Ingestion slice: EPL, one complete season → raw cache → canonical tables, upserts, resumable | Running twice gives an identical DB; resume works after a kill | 15–25 | Next: slice plan proposed, awaiting go-ahead |
 | 2 | Aggregation + metrics engine: registry, per-90, null handling, position assignment, peer groups, percentiles | Hand-checked per-90 values match; table-driven tests pass | 15–25 | |
 | 3 | Backend API: search, player, player-season, compare, peers; provenance in every response | API contract tests pass | 6–10 | |
 | 4 | MVP UI: search, player page, radar, bars, comparison with position presets, scatter | **MVP done** | 25–40 | |
@@ -57,12 +57,12 @@ Weekly hours vary and there's no target date. Track progress by phase, not by ca
 ## Crawl order
 
 1. EPL, one complete season (2025-26), as the Phase 1 slice.
-2. EPL backfill to the earliest season available (2021-22 according to coverage notes; verify).
+2. EPL backfill to 2021-22 (verified available for all top-5 leagues).
 3. EPL current season, incremental.
 4. La Liga, then Bundesliga, Serie A, Ligue 1.
 5. After the MVP: Eredivisie, Liga Portugal, MLS, Saudi Pro League, and others, each after a coverage check.
 
-Rough load: about 380 matches × 2 match endpoints, plus first-time player profile lookups, comes to about 1,000–1,300 requests per EPL season. At 1 request/s that's well under an hour per season.
+Load (spike-verified): 1 unpaginated match-list request + 3 requests per match (players, advanced, lineups) + first-time player profiles ≈ 1,150 + ~600 profiles per EPL season. At 1 request/s that's about 30 minutes per league-season.
 
 ## FM workflow
 
@@ -74,16 +74,20 @@ Rough load: about 380 matches × 2 match endpoints, plus first-time player profi
 
 Verified details are in [PITCHAPI_NOTES.md](PITCHAPI_NOTES.md).
 
-**Answered (2026-11-19, from the docs and the SDK source):**
+**Answered:**
 - **Season format:** `"2025/2026"`, taken from `/v1/leagues`.
-- **Player names:** included in every player stat row.
-- **Minutes:** `minutes_played` comes with each player's match stats.
-- **Raw JSON from the SDK:** only through the private `_get`. The SDK's models default missing counts to 0, so we parse raw JSON with our own Pydantic models whichever way we fetch. The fetch choice (SDK `_get` vs our own httpx client) is made at Phase 1.
+- **Raw JSON / fetch choice:** our own httpx client (D-009).
+- **Per-match position (spike):** lineups slot grid code + formation → role; profile `position_id` is a fallback only.
+- **`chances_created` (spike):** equals `key_passes` in 277/277 rows.
+- **Minutes denominator:** `/players` minutes, a full match = 90 (D-010).
+- **Missing keys in `/players` (spike):** the meaning depends on the key; each metric gets an absence policy (see PITCHAPI_NOTES).
+- **Schema questions:** all resolved (D-011).
 
 **Still open:**
-- **Per-match position.** The list endpoint's `position_id` is often null. Lineups give starters a formation slot plus `pitch_x`/`pitch_y`, and substitutes a broad category (GK/DEF/MID/ATT). What profile `position_id` numbers mean is undocumented. Settled by the spike.
-- **`chances_created`.** The docs both say it equals `key_passes` and define it as assists + key passes. Settled by the spike.
+- **Every formation PitchAPI uses.** Collect them in the Phase 1 crawl, then complete `formation_role` before Phase 2.
+- **Role judgement calls** (4-2-3-1's 64/66 as DM; 3-4-2-1's 84/86 as AM): check against real players in Phase 2.
 - **Late analytics.** Can advanced analytics appear later for a match that first returned `ANALYTICS_UNAVAILABLE`? Observe over a few weeks.
+- **`was_fouled` null.** Does it mean 0? Check in Phase 1 against the opponents' `fouls`.
 - **Terms of use for caching and redistribution.** Not in the docs. Ask PitchAPI support. Must be answered before hosting.
 
 ## Backlog (post-MVP ideas)
