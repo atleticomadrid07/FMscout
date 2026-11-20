@@ -1,0 +1,43 @@
+{
+  "_note": "HAND-MADE TEST FIXTURE, not real PitchAPI data. Shaped like the real /v1/leagues/{id}/matches `data` payload (Phase 0 spike, 2026-11-19). Team and match names are invented.",
+  "data": {
+    "league": {
+      "id": "l_FIXT01",
+      "name": "Fixture League",
+      "season": "2025/2026",
+      "image_url": "https://example.invalid/leagues/fixture.webp"
+    },
+    "matches": [
+      {
+        "id": "m_FIXT01",
+        "date": "2025-08-15",
+        "time_utc": "2025-08-15T19:00:00Z",
+        "status": "finished",
+        "home_team": {"id": "t_FIXTA1", "name": "Example Athletic", "image_url": "https://example.invalid/teams/a.webp"},
+        "away_team": {"id": "t_FIXTB2", "name": "Sample Rovers", "image_url": "https://example.invalid/teams/b.webp"},
+        "score_home": 2,
+        "score_away": 1
+      },
+      {
+        "id": "m_FIXT02",
+        "date": "2025-08-16",
+        "time_utc": "2025-08-16T14:00:00Z",
+        "status": "finished",
+        "home_team": {"id": "t_FIXTB2", "name": "Sample Rovers", "image_url": "https://example.invalid/teams/b.webp"},
+        "away_team": {"id": "t_FIXTC3", "name": "Placeholder Town", "image_url": null},
+        "score_home": 0,
+        "score_away": 0
+      },
+      {
+        "id": "m_FIXT03",
+        "date": "2025-08-23",
+        "time_utc": "2025-08-23T23:30:00+00:00",
+        "status": "finished",
+        "home_team": {"id": "t_FIXTC3", "name": "Placeholder Town", "image_url": null},
+        "away_team": {"id": "t_FIXTA1", "name": "Example Athletic", "image_url": "https://example.invalid/teams/a.webp"},
+        "score_home": 1,
+        "score_away": 3
+      }
+    ]
+  }
+}

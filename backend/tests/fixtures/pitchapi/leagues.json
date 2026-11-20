@@ -1,0 +1,23 @@
+{
+  "_note": "HAND-MADE TEST FIXTURE, not real PitchAPI data. Shaped like the real /v1/leagues `data` payload (Phase 0 spike, 2026-11-19).",
+  "data": {
+    "leagues": [
+      {
+        "id": "l_FIXT01",
+        "name": "Fixture League",
+        "country_code": "ENG",
+        "image_url": "https://example.invalid/leagues/fixture.webp",
+        "is_free": true,
+        "seasons": ["2024/2025", "2025/2026", "2026/2027"]
+      },
+      {
+        "id": "l_FIXT02",
+        "name": "Calendar League",
+        "country_code": "USA",
+        "image_url": null,
+        "is_free": true,
+        "seasons": ["2026", "2025"]
+      }
+    ]
+  }
+}
