@@ -140,8 +140,11 @@ Derived and rebuilt after each sync. rapidfuzz then re-ranks the FTS candidates,
 raw_response   cache_key PK (method + path + sorted query params), path, params_json,
                status, error_code (nullable), error_message (nullable),
                body_gz BLOB (nullable; gzip of the `data` payload),
-               fetched_at, expires_at (nullable), recheck_at (nullable)
+               fetched_at
 ```
+
+- **Freshness is worked out when a response is read:** `fetched_at` plus the current `FreshnessPolicy` for that endpoint class. There's no stored `expires_at`/`recheck_at` (changed in slice 1a, 2026-11-19), so changing a TTL also applies to responses already stored. For example, a match list fetched while its season was current stops being refetched once the season is complete.
+- **Managed with stdlib `sqlite3`, not Alembic.** It's one table. The schema version lives in `PRAGMA user_version`, and opening a file with a different version fails.
 
 ## 6. Aggregates (Phase 2)
 
@@ -274,7 +277,7 @@ Each import is a snapshot, so tracking a player over time means comparing scopes
   - **Reference:** `competition`, `season`, `team`, `player`, and the four `*_source_id` maps
   - **Matches and stats:** `match`, `appearance`, `metric`, `stat_value`, `formation_role`
   - **Sync and search:** `sync_state`, `player_fts`
-  - **In `raw.db`:** `raw_response`
+  - (`raw.db`'s `raw_response` is created by `RawStore`, not Alembic; done in slice 1a)
 - **Code:** the cache layer over `PitchApiClient`, Pydantic parsers for the 5 endpoints, the registry (an initial metric list), the normalizer, and the `sync` CLI command.
 - **Exit test:** two full EPL 2025/26 syncs produce an identical `scouting.db`, and a sync killed halfway resumes correctly.
 - §6 (aggregates and percentiles) is Phase 2. §8 (FM) is Phases 6–7.

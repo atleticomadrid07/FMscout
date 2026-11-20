@@ -1,0 +1,11 @@
+Scouting: 
+- Saved visualization graphs
+- Season by season graphs -> added to total profile
+
+
+
+FM:
+- Player profiles stored locally - UID
+- visualizations/stats stored on profile
+- Total and season by season stats
+- FPL points calculator?
