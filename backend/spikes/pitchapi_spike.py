@@ -186,9 +186,20 @@ def flatten(obj: Json, prefix: str = "") -> dict[str, Json]:
 
 
 def stat_entries(node: Json, group: str = "?") -> Iterator[tuple[str, dict[str, Any]]]:
-    """Yield (nearest ancestor group key, entry) for every dict with `key` + string `type`."""
+    """Yield (group key, entry) for /players stat entries.
+
+    Real shape (spike): {"key": "top_stats", "stats": {"<Label>": {"key": str, "stat":
+    {"type": str, "value": ..., "total"?: ...}}}}. The docs describe key/type on one level;
+    the response nests them, so an entry is any dict with a string `key` and a `stat` dict
+    that has a string `type`.
+    """
     if isinstance(node, dict):
-        if "key" in node and isinstance(node.get("type"), str):
+        stat = node.get("stat")
+        if (
+            isinstance(node.get("key"), str)
+            and isinstance(stat, dict)
+            and isinstance(stat.get("type"), str)
+        ):
             yield group, node
             return
         own = node.get("key")
@@ -251,22 +262,31 @@ def analyze_stat_keys() -> None:
     section("1. /players stat key inventory: group / key / type, presence, nulls")
     seen: Counter[tuple[str, str, str]] = Counter()
     nulls: Counter[tuple[str, str, str]] = Counter()
-    entry_fields: Counter[str] = Counter()
+    stat_fields: Counter[str] = Counter()
+    groups_per_key: dict[str, set[str]] = defaultdict(set)
+    player_rows = 0
     for name in files("match_", "_players"):
         record = load(name)
         if record["error"]:
             continue
+        player_rows += len(record["data"]) if isinstance(record["data"], list) else 0
         for group, entry in stat_entries(record["data"]):
-            ident = (group, str(entry["key"]), entry["type"])
+            stat = entry["stat"]
+            key = entry["key"] or "<empty>"
+            ident = (group, key, stat["type"])
             seen[ident] += 1
-            if entry.get("value") is None:
+            groups_per_key[key].add(group)
+            if stat.get("value") is None:
                 nulls[ident] += 1
-            entry_fields.update(entry.keys())
-    print(f"fields seen on entries: {dict(entry_fields)}\n")
-    print(f"{'group':<20} {'key':<34} {'type':<26} {'count':>6} {'null value':>10}")
+            stat_fields.update(stat.keys())
+    print(f"player rows: {player_rows}")
+    print(f"fields seen inside `stat`: {dict(stat_fields)}\n")
+    print(f"{'group':<18} {'key':<40} {'type':<24} {'count':>6} {'null':>5}")
     for ident in sorted(seen):
         group, key, typ = ident
-        print(f"{group:<20} {key:<34} {typ:<26} {seen[ident]:>6} {nulls[ident]:>10}")
+        print(f"{group:<18} {key:<40} {typ:<24} {seen[ident]:>6} {nulls[ident]:>5}")
+    dupes = {k: sorted(g) for k, g in groups_per_key.items() if len(g) > 1}
+    print(f"\nkeys appearing in more than one group (dedupe when parsing): {dupes or 'none'}")
 
 
 def analyze_advanced() -> list[dict[str, Any]]:
@@ -334,7 +354,7 @@ def analyze_chances_created(rows: list[dict[str, Any]]) -> None:
     )
 
 
-def analyze_lineups() -> None:
+def analyze_lineups() -> list[dict[str, Any]]:
     section("4. Lineups: position_id vs pitch_x/pitch_y (full table in lineups.csv)")
     out_rows: list[dict[str, Any]] = []
     for name in files("match_", "_lineups"):
@@ -367,7 +387,7 @@ def analyze_lineups() -> None:
                 stack.extend((v, formation) for v in node)
     if not out_rows:
         print("no rows with pitch_x found")
-        return
+        return out_rows
     with (DATA_DIR / "lineups.csv").open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(out_rows[0]))
         writer.writeheader()
@@ -385,21 +405,37 @@ def analyze_lineups() -> None:
         by_slot.items(), key=lambda kv: (kv[0][0], str(kv[0][1]))
     ):
         print(f"  {formation:<10} {pos!s:>4}: {' '.join(coords[:8])}")
+    return out_rows
 
 
-def analyze_profiles() -> None:
-    section("5. Player profiles: position_id (fill in the known position by hand)")
+def analyze_profiles(lineup_rows: list[dict[str, Any]]) -> None:
+    section("5. Player profiles: profile position_id vs lineup slots the player started in")
+    slots: dict[str, list[str]] = defaultdict(list)
+    for r in lineup_rows:
+        who = json.loads(r["who"])
+        pid = who.get("player_id") or who.get("id")
+        if isinstance(pid, str):
+            kind = "start" if (r["pitch_x"] or r["pitch_y"]) else "sub"
+            slots[pid].append(f"{r['formation']}:{r['position_id']}({kind})")
+    print(f"{'profile pos':>11}  {'player':<34} lineup slots")
     for name in files("player_"):
         record = load(name)
+        player_id = record["path"].rsplit("/", 1)[-1]
         if record["error"]:
-            print(f"{name}: {record['error']}")
+            print(f"{'-':>11}  {player_id:<34} {record['error']}")
             continue
         # The profile may be wrapped (e.g. {"player": {...}}): use the first dict with position_id.
         profile = next(rows_with(record["data"], "position_id"), None)
         if profile is None:
-            print(f"{name}: no position_id found; top-level keys: {first_keys([record['data']])}")
+            print(
+                f"{'?':>11}  {player_id:<34} no position_id; keys: {first_keys([record['data']])}"
+            )
             continue
-        print(f"position_id={profile['position_id']!s:>5}  {identity(profile)}")
+        label = f"{player_id} {profile.get('name', '')}".strip()
+        print(f"{profile['position_id']!s:>11}  {label:<34} {', '.join(slots[player_id]) or '-'}")
+    if files("player_"):
+        sample = load(files("player_")[0])["data"]
+        print(f"\nfirst profile, raw (to see every field):\n{json.dumps(sample, indent=1)[:1500]}")
 
 
 def analyze_coverage() -> None:
@@ -413,7 +449,11 @@ def analyze_coverage() -> None:
         )
         rating = "-"
         if players.exists() and (rec := load(players.stem))["error"] is None:
-            rated = sum(1 for _, e in stat_entries(rec["data"]) if e["key"] == "rating_title")
+            rated = sum(
+                1
+                for _, e in stat_entries(rec["data"])
+                if e["key"] == "rating_title" and e["stat"].get("value") is not None
+            )
             rating = str(rated)
         adv_status = "-"
         if adv.exists():
@@ -433,8 +473,8 @@ def run_analyze() -> None:
     analyze_stat_keys()
     rows = analyze_advanced()
     analyze_chances_created(rows)
-    analyze_lineups()
-    analyze_profiles()
+    lineup_rows = analyze_lineups()
+    analyze_profiles(lineup_rows)
     analyze_coverage()
 
 
