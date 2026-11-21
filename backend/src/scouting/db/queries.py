@@ -510,3 +510,81 @@ def threshold_report(session: Session, scope_id: int) -> tuple[list[GroupInfo], 
             counts[group.peer_role] = (ranked or 0, with_data or 0)
         report.append(ThresholdRow(metric.code, metric.min_attempts, counts))
     return infos, report
+
+
+# --- metric coverage per peer group (slice 2e: template options) -----------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageCell:
+    """One metric in one peer group: how many are ranked, and the shape of their values."""
+
+    ranked: int  # players with a percentile for the metric (eligible)
+    zero_share: float | None  # share of the ranked whose value is 0 (rare events); None: nobody
+    median: float | None  # of the ranked players' values (per 90 or rate, as ranked)
+    p90: float | None  # the value at the group's 90th percentile
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageRow:
+    code: str
+    label: str
+    kind: str
+    source: str
+    is_model_output: bool
+    direction: str
+    applies_to: str
+    basis: str  # per90 or rate: what the percentiles rank
+    min_attempts: int | None
+    cells: dict[str, CoverageCell]  # peer role -> cell
+
+
+def _quantile(ordered: list[float], q: float) -> float:
+    """Linear interpolation between the closest ranks (the 'inclusive' method)."""
+    position = q * (len(ordered) - 1)
+    low = int(position)
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
+def metric_coverage(session: Session, scope_id: int) -> tuple[list[GroupInfo], list[CoverageRow]]:
+    """For every metric and peer group: players ranked, the share of zeros, the median and
+    the 90th-percentile value, from the stored percentiles (the values they rank). Shows
+    which metrics carry a signal for a position before they go on a template. Read-only."""
+    groups = sorted(
+        session.scalars(select(PeerGroup).where(PeerGroup.scope_id == scope_id)),
+        key=lambda g: PEER_ROLES.index(g.peer_role),
+    )
+    values: dict[tuple[int, int], list[float]] = {}
+    for group_id, metric_id, value in session.execute(
+        select(Percentile.peer_group_id, Percentile.metric_id, Percentile.value).where(
+            Percentile.peer_group_id.in_([g.id for g in groups])
+        )
+    ):
+        values.setdefault((group_id, metric_id), []).append(value)
+    rows: list[CoverageRow] = []
+    for metric in session.scalars(select(Metric).order_by(Metric.id)):
+        cells: dict[str, CoverageCell] = {}
+        for group in groups:
+            ranked = sorted(values.get((group.id, metric.id), []))
+            cells[group.peer_role] = CoverageCell(
+                ranked=len(ranked),
+                zero_share=sum(v == 0 for v in ranked) / len(ranked) if ranked else None,
+                median=_quantile(ranked, 0.5) if ranked else None,
+                p90=_quantile(ranked, 0.9) if ranked else None,
+            )
+        rows.append(
+            CoverageRow(
+                code=metric.code,
+                label=metric.label,
+                kind=metric.kind,
+                source=metric.source,
+                is_model_output=metric.is_model_output,
+                direction=metric.direction,
+                applies_to=metric.applies_to,
+                basis="rate" if metric.aggregation == "rate_from_sums" else "per90",
+                min_attempts=metric.min_attempts,
+                cells=cells,
+            )
+        )
+    return [GroupInfo(g.peer_role, g.size, g.min_minutes) for g in groups], rows

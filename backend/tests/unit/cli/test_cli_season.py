@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import csv
 import runpy
 import sqlite3
 import sys
@@ -469,3 +470,45 @@ def test_inspect_player_by_formation(
         "6 or 8: a 6 (DM) by formation: 2 central-mid starts with a heatmap (needs 5); "
         "23.0 m in front of his centre-backs over 2 starts"
     )
+
+
+# --- slice 2e: template options ---------------------------------------------------------------
+
+OPTIONS_SCRIPT = Path(__file__).parents[3] / "scripts" / "template_options.py"
+
+
+def test_template_options_script_writes_the_csv(
+    seeded: None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    before = invoke("report", "checksum").output
+    out_file = tmp_path / "options.csv"
+    monkeypatch.setattr(sys, "argv", ["template_options.py", *SEASON_ARGS, "--out", str(out_file)])
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(OPTIONS_SCRIPT), run_name="__main__")
+    out = capsys.readouterr().out
+    assert exit_info.value.code == 0, out
+    assert "peer groups (≥ 45 min: GK 4 · FB 2 · W 2 · ST 2)" in out
+    with out_file.open(encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 4 * len({r["metric"] for r in rows})  # every metric x 4 groups
+    goals_st = next(r for r in rows if r["metric"] == "goals" and r["group"] == "ST")
+    assert (goals_st["basis"], goals_st["group_size"]) == ("per90", "2")
+    saves_st = next(r for r in rows if r["metric"] == "saves" and r["group"] == "ST")
+    assert saves_st["ranked"] == "0" and saves_st["median"] == ""  # keepers only
+    assert invoke("report", "checksum").output == before  # wrote nothing to scouting.db
+
+
+def test_template_options_script_explains_a_missing_season(
+    seeded: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        sys, "argv", ["template_options.py", "--league", "l_NOPE", "--season", "1999"]
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(OPTIONS_SCRIPT), run_name="__main__")
+    assert exit_info.value.code == 1
+    assert "isn't in scouting.db" in capsys.readouterr().err
