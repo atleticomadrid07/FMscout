@@ -87,7 +87,7 @@ Each entry: date, decision, why, and the alternatives that were rejected.
 - **SQLite migration rule:** use plain string server defaults (`server_default="0"`), never `sa.text(...)` or `false()`. Alembic rebuilds the whole table for a SQL-expression default, and with foreign keys on, that fails once other tables reference it.
 - **Rejected:** slot 95 as ST, 4-1-3-2's 83/87 as W.
 ## D-014 · 2026-11-20 · Phase 2 design: aggregation and percentile rules
-- **Aggregation (slice 2a):**
+- **Aggregation (slice 2a, built and hand-checked on EPL 2025/26):**
   - **Exposure minutes per metric** = minutes of the appearances with a row for that metric. Matches without advanced analytics add no minutes to advanced metrics; keepers' minutes never count for shots.
   - **A stored NULL** follows the registry's `season_null`: `skip` (unknown: adds no total and no minutes; `was_fouled`, the default) or `zero` (a known zero: `xgot`, NULL = no shot on target).
   - **per90** = total ÷ exposure minutes × 90; **rate** = Σ successes ÷ Σ attempts (the exact weighted average for keeper rates). NULL when undefined.
@@ -95,14 +95,23 @@ Each entry: date, decision, why, and the alternatives that were rejected.
   - **Rebuilt per season in one transaction**, deterministic (`computed_at` = latest `normalized_at`), so `report checksum` stays stable. Runs automatically after a `sync season` that leaves nothing pending, and on demand with `scouting aggregate`.
 - **Percentiles (slice 2b):**
   - **Formula: midpoint.** pct = (players below + ½ × players tied) ÷ n × 100. Tied players (mostly zeros in rare-event stats) sit in the middle of their block, not at its bottom or top.
-  - **Minimum attempts per fraction metric:** below it, no percentile for that metric, and the player is flagged. Thresholds proposed in 2b for the user to adjust.
-  - **Stored raw:** low value = low percentile for every metric. The UI flips lower-is-better metrics using `higher_is_better`; style metrics (e.g. `launch_pct`, `avg_pass_length`) get a "no direction" mark so they aren't coloured good or bad.
-  - **Small peer groups:** warn below 20 players, but still show the percentiles.
+  - **Eligibility per metric:** per-90 metrics need the minimum minutes (855 for a full EPL season) on that metric's own exposure; rate metrics need a minimum number of season attempts. Approved starting values (tune with `report thresholds`): passes 200, long balls 20, crosses 20, dribbles 15, take-ons 15, ground duels 30, aerials 15, claims 10 (`claims_won`, `claim_rate`), distributions 100 (`distribution_accuracy`, `launch_pct`, `avg_pass_length`). No minimums on count totals: cutting off low performers would skew everyone else's percentiles.
+  - **Stored in the `metric` table:** two new columns, the minimum attempts and a direction (higher / lower / none), so the API and UI can explain an exclusion ("needs 200 passes"). Safe migration: added columns with string defaults (D-013 rule).
+  - **Excluded players get no percentile row**; the UI derives the reason from the season stats. They can still be compared: the on-the-fly "rank against a group" function places them against the peer group without adding them to it, flagged.
+  - **Each percentile stores the number of players it was ranked among**, since eligibility can differ per metric within one peer group.
+  - **Stored raw:** low value = low percentile for every metric. The UI flips lower-is-better metrics. "No direction" (not coloured good or bad): `launch_pct`, `avg_pass_length`, `corners`.
+  - **Small peer groups:** warn below 20 players, but still show the percentiles. EPL 2025/26 has none (smallest: GK 25, AM 25).
   - **Bases:** per-90 for counts, model outputs and distances; rate for fractions. No percentiles on season totals (they mostly measure minutes).
 - **Why:** Matches the scouting requirements (explicit peer group, sample size always shown, null ≠ 0), and keeps the UI from scanning `stat_value`.
 - **Rejected:**
   - `percent_rank` (puts all tied zeros at 0th) and cumulative distribution (puts them at the top of their block, so "did nothing" can look above average).
   - Statistical shrinkage for small samples: more accurate, but overkill for now.
   - Storing percentiles pre-flipped: the user prefers the UI to flip.
+  - Thresholds in code only: the UI couldn't explain an exclusion.
   - Larger peer groups by pooling leagues or seasons: adding leagues doesn't enlarge a one-league peer group by itself. Pooling the top 5 is a Phase 5 option (backlog).
+## D-015 · 2026-11-20 · Position templates measure process, not outcomes (slice 2d)
+- **Decision:** one template per peer role (GK, CB, FB, CM, AM, W, ST), about 12 metrics in sections, in `mappings/position_templates.yaml`. They drive the radars and the comparison presets. Templates use **underlying / process metrics**: npxG, xGOT, shots, touches in the box, xA or xAG, key passes or chances created, SCA, xT, VAEP, progressive actions, defensive actions and duel success; for keepers, goals prevented, claims and distribution. **Outcomes stay out of templates** (goals, assists, GCA, big chances missed, goals conceded) and are shown prominently elsewhere on the scouting page.
+- **Why:** the user's scouting view: two strikers with 10 npxG are getting into the same positions whether they scored 5 or 11; finishing varies. Templates also fix the metric list the product uses, which becomes the FM24 view's column list (D-006), and they settle the near-duplicate pairs (`xa`/`xag`, `dribbles_completed`/`take_ons_completed`, `claims_won`/`claim_rate`, `key_passes`/`chances_created`).
+- **Caveats:** model outputs are flagged as models in the UI. PitchAPI gives no penalty goals, so "goals vs npxG" would favour penalty takers; the fair finishing comparison on the page is **goals vs xG** (both include penalties).
+- **Rejected:** leaving templates to Phase 4: the metric list is needed for the FM workflow at the end of Phase 2, and the templates can be checked against real eligibility counts now.
  
