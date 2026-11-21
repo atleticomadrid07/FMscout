@@ -216,6 +216,12 @@ class PlayerSeason:
     stats: list[SeasonStatLine]
     group: GroupInfo | None  # the peer group he's ranked in; None = not in one
     group_min_minutes: int | None  # the scope's threshold, to explain why he isn't
+    # Central mids only (D-018): how the 6/8 group was decided and the depths behind it.
+    peer_method: str | None = None
+    depth: float | None = None  # share of the pitch length in front of his centre-backs
+    depth_starts: int | None = None
+    partner_gap: float | None = None
+    partner_starts: int | None = None
 
 
 def player_season(session: Session, scope_id: int, player_id: int) -> PlayerSeason | None:
@@ -322,6 +328,11 @@ def player_season(session: Session, scope_id: int, player_id: int) -> PlayerSeas
             else None
         ),
         group_min_minutes=any_group.min_minutes if any_group is not None else None,
+        peer_method=scope_row.peer_method,
+        depth=scope_row.depth,
+        depth_starts=scope_row.depth_starts,
+        partner_gap=scope_row.partner_gap,
+        partner_starts=scope_row.partner_starts,
     )
 
 

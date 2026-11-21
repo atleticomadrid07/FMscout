@@ -15,8 +15,11 @@ from typing import Final, Literal
 
 Role = Literal["GK", "CB", "FB", "WB", "DM", "CM", "AM", "W", "ST"]
 Side = Literal["L", "C", "R"]
-PeerRole = Literal["GK", "CB", "FB", "CM", "AM", "W", "ST"]
-PEER_ROLES: Final[tuple[PeerRole, ...]] = ("GK", "CB", "FB", "CM", "AM", "W", "ST")
+PeerRole = Literal["GK", "CB", "FB", "DM", "CM", "AM", "W", "ST"]
+PEER_ROLES: Final[tuple[PeerRole, ...]] = ("GK", "CB", "FB", "DM", "CM", "AM", "W", "ST")
+# The two central-midfield groups (D-017/D-018): 6s (DM) and 8s (CM). The formation only
+# proposes one of them; aggregation decides by heatmap depth (metrics/depth.py).
+CENTRAL_MID_PEER_ROLES: Final[tuple[PeerRole, ...]] = ("DM", "CM")
 
 ROLES: Final[tuple[Role, ...]] = ("GK", "CB", "FB", "WB", "DM", "CM", "AM", "W", "ST")
 SIDES: Final[tuple[Side, ...]] = ("L", "C", "R")
@@ -28,13 +31,14 @@ CENTRE_COLUMN: Final = 5
 SUB_CATEGORY_GK: Final = 0
 SUB_CATEGORIES: Final = {0: "GK", 1: "DEF", 2: "MID", 3: "ATT", -1: "unclassified"}
 
-# Detailed role → peer group for percentiles (7 groups, D-011).
+# Detailed role → peer group for percentiles (8 groups: D-011, 6/8 split D-018). For DM and
+# CM this is only a starting point: aggregation re-decides every central mid by depth.
 PEER_ROLE: Final[dict[Role, PeerRole]] = {
     "GK": "GK",
     "CB": "CB",
     "FB": "FB",
     "WB": "FB",
-    "DM": "CM",
+    "DM": "DM",
     "CM": "CM",
     "AM": "AM",
     "W": "W",
@@ -214,14 +218,18 @@ def listed_slot_roles(slot_code: int | None) -> tuple[Role | None, PeerRole | No
     """Fallback role for a player with no starts, from the profile's listed slot (SCHEMA §7).
 
     Formation-free: a slot counts only as far as every mapped formation agrees on it. 64/66
-    is DM in a 4-2-3-1 but CM in a 3-4-2-1, so the role is unknown but the peer role is CM.
-    84/86 is W, AM or CM depending on the formation, so both are unknown. Broad categories
-    (0-3) and unmapped slots give nothing.
+    is DM in a 4-2-3-1 but CM in a 3-4-2-1, so the role is unknown; the peer role is a central
+    midfield one either way, given as CM (a listed slot can't tell a 6 from an 8, and the
+    formation fallback calls a midfielder with no single-pivot starts an 8). 84/86 is W, AM
+    or CM depending on the formation, so both are unknown. Broad categories (0-3) and unmapped
+    slots give nothing.
     """
     if slot_code is None:
         return None, None
     roles = {slots[slot_code] for slots in FORMATION_ROLES.values() if slot_code in slots}
     peers = {PEER_ROLE[role] for role in roles}
+    if len(peers) > 1 and peers <= set(CENTRAL_MID_PEER_ROLES):
+        peers = {"CM"}
     role = next(iter(roles)) if len(roles) == 1 else None
     peer = next(iter(peers)) if len(peers) == 1 else None
     return role, peer

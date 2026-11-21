@@ -84,7 +84,7 @@ def test_unmapped_returns_none(formation: str | None, slot: int) -> None:
 def test_every_role_has_a_peer_group() -> None:
     assert set(PEER_ROLE) == set(ROLES)
     assert PEER_ROLE["AM"] == "AM"  # 10s are their own group (D-011)
-    assert PEER_ROLE["WB"] == "FB" and PEER_ROLE["DM"] == "CM"
+    assert PEER_ROLE["WB"] == "FB" and PEER_ROLE["DM"] == "DM"  # 6s their own group (D-018)
 
 
 def test_formation_role_rows_cover_every_slot() -> None:

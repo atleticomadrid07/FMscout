@@ -21,13 +21,20 @@ The deeper-partner gap (2d-2b): per match, his depth minus that of his team's de
 starting central midfielder; positive = someone beside him plays deeper. A 6 by depth whose
 deepest partner is on average clearly deeper is an 8 beside a deeper 6 (Bernardo Silva next
 to Rodri). It uses the size of the gap, not the rank, so two genuine 6s a metre apart stay
-6s. The report shows who would flip at a few candidate gaps; the user picks one (D-018).
+6s. The user picked G = 2 m from the 2d-2b report (D-018).
+
+The rule (slice 2d-3, `classify_central_mids`, run by aggregation for every central mid):
+- at least MIN_DEPTH_STARTS central-mid starts with a heatmap → depth decides: at or above
+  the cut an 8 (CM), below it a 6 (DM) unless his deepest partner played at least G deeper
+  over at least MIN_PARTNER_STARTS starts beside one, which makes him an 8 ("partner");
+- otherwise the formation: a 6 if most of his central-mid minutes came as a lone DM (single
+  pivot), else an 8 ("formation").
 """
 
 from __future__ import annotations
 
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
@@ -46,28 +53,35 @@ from scouting.db.models import (
     Scope,
 )
 from scouting.db.queries import _main_teams
+from scouting.domain.positions import CENTRAL_MID_PEER_ROLES
 
 Reference = Literal["outfield", "centre_backs"]
 Label = Literal["DM", "CM"]
+Method = Literal["depth", "partner", "formation"]  # as models.PEER_METHODS
 
 REFERENCES: Final[tuple[Reference, ...]] = ("outfield", "centre_backs")
 REFERENCE_LABELS: Final[dict[Reference, str]] = {
     "outfield": "the team's starting outfield players",
     "centre_backs": "the team's starting centre-backs",
 }
-CENTRAL_MID_ROLES: Final = ("DM", "CM")
+CENTRAL_MID_ROLES: Final = ("DM", "CM")  # formation roles: the starts that count
 CENTRE_BACK_ROLE: Final = "CB"
-CENTRAL_MID_PEER_ROLE: Final = "CM"  # the group that splits into DM and CM in slice 2d-3
+LONE_PIVOT_ROLE: Final = "DM"  # a DM-role starter with no other DM beside him: a single pivot
 MIN_DEPTH_STARTS: Final = 5  # fewer central-mid starts with a heatmap: formation fallback (D-017)
+MIN_PARTNER_STARTS: Final = 5  # starts beside another central mid for the partner rule (D-018)
 PITCH_LENGTH_M: Final = 105.0  # for showing depth differences in metres
 # Cross-check: a "6" by depth who is rarely his team's deepest midfielder, or an "8" who
 # usually is, gets listed for a second look. Only with enough comparable starts.
 DEEPEST_OFTEN: Final = 0.7
 DEEPEST_RARELY: Final = 0.3
-# Agreed after 2d-2 (to be recorded as D-018 with the partner gap).
+# The agreed rule (D-018).
 DEPTH_REFERENCE: Final[Reference] = "centre_backs"
 DEPTH_CUT_M: Final = 14.0  # a 6 plays less than 14 m in front of his centre-backs
-PARTNER_GAP_CANDIDATES_M: Final = (2.0, 3.0, 4.0, 5.0)  # shown in the report; one gets picked
+PARTNER_GAP_M: Final = 2.0  # ... unless his deepest partner plays at least 2 m deeper still
+PARTNER_GAP_CANDIDATES_M: Final = (2.0, 3.0, 4.0, 5.0)  # the report's table, to re-check G
+BORDERLINE_M: Final = 1.0  # shown as borderline when this close to the cut
+DEPTH_CUT: Final = DEPTH_CUT_M / PITCH_LENGTH_M  # the same, as shares of the pitch length
+PARTNER_GAP: Final = PARTNER_GAP_M / PITCH_LENGTH_M
 
 # The user's anchors (D-017): clear 6s and 8s in EPL 2025/26, by football judgement. Matched
 # as substrings of player.search_name (unidecoded, lowercase). Provisional: "don't take my
@@ -240,6 +254,78 @@ def label_for(relative: float, cut: float) -> Label:
     return "DM" if relative < cut else "CM"
 
 
+def classify(
+    depth: SeasonDepth | None, cut: float | None = None, gap: float | None = None
+) -> tuple[Label, Method] | None:
+    """The 6/8 call from a season's depth (D-018), or None when the formation must decide.
+    `cut` and `gap` default to the agreed DEPTH_CUT and PARTNER_GAP (read at call time)."""
+    cut = DEPTH_CUT if cut is None else cut
+    gap = PARTNER_GAP if gap is None else gap
+    if depth is None or not depth.enough_starts or depth.relative is None:
+        return None
+    if depth.relative >= cut:
+        return "CM", "depth"
+    if (
+        depth.partner_gap is not None
+        and depth.comparable >= MIN_PARTNER_STARTS
+        and depth.partner_gap >= gap
+    ):
+        return "CM", "partner"
+    return "DM", "depth"
+
+
+def is_borderline(relative: float, cut: float | None = None) -> bool:
+    """Within BORDERLINE_M of the cut (default: the agreed one); the distribution has no
+    natural gap, so these labels are close calls (D-018)."""
+    cut = DEPTH_CUT if cut is None else cut
+    return abs(relative - cut) < BORDERLINE_M / PITCH_LENGTH_M
+
+
+def lone_pivot_labels(rows: Iterable[AppearanceRow]) -> dict[int, Label]:
+    """The formation fallback for every player with a central-mid start: a 6 if more than
+    half of those minutes came as the only DM-role starter in his team (a single pivot),
+    else an 8. A double pivot's DMs (4-2-3-1) mix 6s and 8s, so they count as 8s here."""
+    by_side: dict[tuple[int, int], list[AppearanceRow]] = defaultdict(list)
+    for row in rows:
+        if row.is_starter and row.role in CENTRAL_MID_ROLES:
+            by_side[(row.match_id, row.team_id)].append(row)
+    lone: dict[int, int] = defaultdict(int)
+    total: dict[int, int] = defaultdict(int)
+    for mids in by_side.values():
+        pivots = [r for r in mids if r.role == LONE_PIVOT_ROLE]
+        for r in mids:
+            total[r.player_id] += r.minutes
+            if len(pivots) == 1 and r is pivots[0]:
+                lone[r.player_id] += r.minutes
+    return {pid: "DM" if lone[pid] * 2 > minutes else "CM" for pid, minutes in total.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class Classification:
+    peer_role: Label
+    method: Method
+    depth: SeasonDepth | None  # against DEPTH_REFERENCE; None: no start with a heatmap
+
+
+def classify_central_mids(
+    rows: Sequence[AppearanceRow], player_ids: Iterable[int]
+) -> dict[int, Classification]:
+    """The 6/8 group of each given player (the central mids of one season), by depth where
+    he has enough starts with a heatmap, else by formation. Pure: aggregation stores it."""
+    depths = season_depths(match_depths(rows, DEPTH_REFERENCE))
+    fallback = lone_pivot_labels(rows)
+    out: dict[int, Classification] = {}
+    for player_id in player_ids:
+        season = depths.get(player_id)
+        call = classify(season)
+        out[player_id] = (
+            Classification(fallback.get(player_id, "CM"), "formation", season)
+            if call is None
+            else Classification(call[0], call[1], season)
+        )
+    return out
+
+
 def histogram(values: Sequence[float], width: float) -> list[tuple[float, int]]:
     """(bin start, count) for consecutive bins of `width` covering every value."""
     if not values:
@@ -283,6 +369,8 @@ class PlayerLine:
     team: str
     depth: SeasonDepth | None  # against DEPTH_REFERENCE; None: no central-mid start with a heatmap
     outfield: float | None = None  # the second opinion: relative to the outfield players
+    stored: str | None = None  # the peer role aggregation stored (DM or CM)
+    method: str | None = None  # ... and how it was decided (depth, partner, formation)
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,7 +384,7 @@ class AnchorLine:
 @dataclass(frozen=True, slots=True)
 class Calibration:
     min_minutes: int
-    group: list[PlayerLine]  # the CM peer group, deepest first; without enough starts last
+    group: list[PlayerLine]  # the DM + CM peer groups, deepest first; too few starts last
     anchors: list[AnchorLine]
     cut: float  # the agreed cut (relative depth), or one being tried
     suggested: Cut | None  # the cut that best separates the anchors, for comparison
@@ -321,7 +409,7 @@ class Calibration:
             p
             for p in self.sixes()
             if p.depth is not None
-            and p.depth.comparable >= MIN_DEPTH_STARTS
+            and p.depth.comparable >= MIN_PARTNER_STARTS
             and (g := _gap(p)) is not None
             and g >= gap
         ]
@@ -331,6 +419,23 @@ class Calibration:
         flipped = 0 if gap is None else len(self.partner_flips(gap))
         dm = sum(1 for p in self.classified if _relative(p) < self.cut) - flipped
         return dm, len(self.classified) - dm, len(self.group) - len(self.classified)
+
+    def stored_counts(self) -> tuple[Counter[str | None], Counter[str | None]]:
+        """(players per stored peer role, per method) in the group."""
+        return Counter(p.stored for p in self.group), Counter(p.method for p in self.group)
+
+    def mismatches(self) -> list[PlayerLine]:
+        """Players whose stored group or method isn't what the rule gives now (at this cut and
+        the agreed G): the aggregates are older than the rule, so `scouting aggregate`."""
+        out = []
+        for p in self.group:
+            call = classify(p.depth, self.cut)
+            if call is None:  # the formation decides; only the method can be checked here
+                if p.method != "formation":
+                    out.append(p)
+            elif (p.stored, p.method) != call:
+                out.append(p)
+        return out
 
     def nearest(self, n: int) -> list[PlayerLine]:
         """The n classified players closest to the cut."""
@@ -365,18 +470,19 @@ def _gap(p: PlayerLine) -> float | None:
 def calibrate(
     session: Session,
     season_id: int,
-    cut: float = DEPTH_CUT_M / PITCH_LENGTH_M,
+    cut: float | None = None,
     rows: list[AppearanceRow] | None = None,
 ) -> Calibration:
-    """The CM peer group's season depths (DEPTH_REFERENCE, plus the outfield value as a
-    second opinion), the anchors, the cut, and the cut the anchors alone would suggest."""
+    """The central mids' season depths (DEPTH_REFERENCE, plus the outfield value as a second
+    opinion) with their stored groups, the anchors, the cut, and the cut the anchors alone
+    would suggest. The group is the DM + CM peer groups together."""
     scope_id = session.scalar(select(Scope.id).where(Scope.season_id == season_id))
     if scope_id is None:
         raise DepthReportError("season isn't aggregated yet: run `scouting aggregate`")
     group = session.scalars(
-        select(PeerGroup).where(
-            PeerGroup.scope_id == scope_id, PeerGroup.peer_role == CENTRAL_MID_PEER_ROLE
-        )
+        select(PeerGroup)
+        .where(PeerGroup.scope_id == scope_id, PeerGroup.peer_role.in_(CENTRAL_MID_PEER_ROLES))
+        .order_by(PeerGroup.id)
     ).first()
     if group is None:
         raise DepthReportError("no central-midfield peer group: run `scouting aggregate`")
@@ -396,13 +502,15 @@ def calibrate(
             teams.get(player_id, "?"),
             depths.get(player_id),
             second[player_id].relative if player_id in second else None,
+            stored,
+            method,
         )
-        for player_id, name in session.execute(
-            select(Player.id, Player.name)
+        for player_id, name, stored, method in session.execute(
+            select(Player.id, Player.name, PlayerScope.peer_role, PlayerScope.peer_method)
             .join(PlayerScope, PlayerScope.player_id == Player.id)
             .where(
                 PlayerScope.scope_id == scope_id,
-                PlayerScope.peer_role == CENTRAL_MID_PEER_ROLE,
+                PlayerScope.peer_role.in_(CENTRAL_MID_PEER_ROLES),
                 PlayerScope.minutes >= group.min_minutes,
             )
         )
@@ -422,7 +530,13 @@ def calibrate(
             p.name,
         ),
     )
-    return Calibration(group.min_minutes, ordered, anchors, cut, best_cut(usable))
+    return Calibration(
+        group.min_minutes,
+        ordered,
+        anchors,
+        DEPTH_CUT if cut is None else cut,
+        best_cut(usable),
+    )
 
 
 def _anchor(

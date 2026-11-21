@@ -30,6 +30,8 @@ ADVANCED_STATUSES: Final = ("pending", "ok", "unavailable")
 SCOPE_KINDS: Final = ("season", "fm_import")
 PERCENTILE_BASES: Final = ("per90", "rate")
 ROLE_SOURCES: Final = ("starts", "listed")
+# How a central midfielder's 6/8 group was decided (D-018; metrics/depth.py).
+PEER_METHODS: Final = ("depth", "partner", "formation")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -349,6 +351,9 @@ class PlayerScope(Base):
         CheckConstraint(
             f"role_source IS NULL OR {_in('role_source', ROLE_SOURCES)}", name="role_source"
         ),
+        CheckConstraint(
+            f"peer_method IS NULL OR {_in('peer_method', PEER_METHODS)}", name="peer_method"
+        ),
         Index(None, "scope_id", "peer_role"),
     )
 
@@ -369,6 +374,14 @@ class PlayerScope(Base):
     avg_rating: Mapped[float | None]  # mean over rated matches only
     rated_matches: Mapped[int]
     computed_at: Mapped[datetime]  # latest normalized_at of the scope's matches: deterministic
+    # Central midfielders only (peer role DM or CM; NULL for everyone else), D-018: how the
+    # 6/8 group was decided, and the season depths behind it. Depths are shares of the pitch
+    # length, like appearance.depth (x 105 for metres).
+    peer_method: Mapped[str | None] = mapped_column(String(10))  # depth, partner, formation
+    depth: Mapped[float | None]  # in front of his centre-backs, minutes-weighted
+    depth_starts: Mapped[int | None]  # central-mid starts with a heatmap behind `depth`
+    partner_gap: Mapped[float | None]  # + = his deepest fellow central mid played deeper
+    partner_starts: Mapped[int | None]  # of those starts, how many beside another central mid
 
 
 class PlayerScopeTeam(Base):

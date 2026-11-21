@@ -616,8 +616,15 @@ def _deepest(p: PlayerLine) -> str:
 
 _TABLE_HEADER: Final = (
     f"    {'player':<26} {'team':<24} {'CBs':>9} {'outfield':>9} {'starts':>6} "
-    f"{'deepest':>11} {'partner':>9}  label"
+    f"{'deepest':>11} {'partner':>9}  label  group"
 )
+
+
+def _stored(p: PlayerLine) -> str:
+    """The stored group, with how it was decided when depth alone didn't."""
+    if p.stored is None:
+        return "-"
+    return p.stored if p.method in (None, "depth") else f"{p.stored} ({p.method})"
 
 
 def _row(p: PlayerLine, cut: float) -> str:
@@ -625,7 +632,8 @@ def _row(p: PlayerLine, cut: float) -> str:
     assert d is not None and d.relative is not None
     return (
         f"    {p.name:<26} {p.team:<24} {_m(d.relative):>9} {_m(p.outfield):>9} "
-        f"{d.starts:>6} {_deepest(p):>11} {_m(d.partner_gap):>9}  {label_for(d.relative, cut)}"
+        f"{d.starts:>6} {_deepest(p):>11} {_m(d.partner_gap):>9}  "
+        f"{label_for(d.relative, cut):<5}  {_stored(p)}"
     )
 
 
@@ -638,11 +646,12 @@ def _print_depth(c: Calibration, show_all: bool) -> None:
         "columns: CBs = metres in front of his centre-backs (decides) · outfield = vs the "
         "outfield players (second opinion) · deepest = how often he was his team's deepest "
         "central mid · partner = how much deeper his deepest partner played (+ = a deeper "
-        "partner, - = he was the deeper one)"
+        "partner, - = he was the deeper one) · label = by depth alone at this cut · "
+        "group = stored by `scouting aggregate` (with how, if not by depth)"
     )
     values = [_relative_of(p) for p in c.classified]
     typer.echo(
-        f"  {len(c.group)} central midfielders (CM peer group, ≥ {c.min_minutes} min); "
+        f"  {len(c.group)} central midfielders (DM + CM peer groups, ≥ {c.min_minutes} min); "
         f"{len(values)} with ≥ {depth_rules.MIN_DEPTH_STARTS} central-mid starts with a heatmap"
     )
     typer.echo("  histogram (1 m bins, labelled by where each starts):")
@@ -668,7 +677,26 @@ def _print_depth(c: Calibration, show_all: bool) -> None:
             f"{c.suggested.margin * PITCH_LENGTH_M:.1f} m; wrong side: {wrong})"
         )
     dm, cm, fallback = c.sizes()
-    typer.echo(f"  with the {_m(c.cut)} cut: DM {dm} · CM {cm} · formation fallback {fallback}")
+    typer.echo(
+        f"  with the {_m(c.cut)} cut, depth alone: DM {dm} · CM {cm} · "
+        f"formation fallback {fallback}"
+    )
+    roles, methods = c.stored_counts()
+    typer.echo(
+        f"  stored groups: DM {roles['DM']} · CM {roles['CM']} (by depth {methods['depth']} · "
+        f"deeper partner {methods['partner']} · formation {methods['formation']})"
+    )
+    if abs(c.cut - depth_rules.DEPTH_CUT) > 1e-9:
+        typer.echo("  (a trial cut: the stored groups use the agreed one and aren't compared)")
+    elif mismatched := c.mismatches():
+        names = ", ".join(p.name for p in mismatched[:10])
+        typer.secho(
+            f"  {len(mismatched)} stored groups differ from the rule ({names}): "
+            "run `scouting aggregate`",
+            fg="yellow",
+        )
+    else:
+        typer.echo("  stored groups match the rule")
 
     typer.echo(f"  closest to the cut ({NEAREST_TO_CUT}):")
     typer.echo(_TABLE_HEADER)
@@ -684,7 +712,7 @@ def _print_depth(c: Calibration, show_all: bool) -> None:
 
     typer.echo(
         "  deeper-partner rule: a 6 by depth whose deepest partner played on average at "
-        f"least G deeper (over ≥ {depth_rules.MIN_DEPTH_STARTS} starts beside a partner) "
+        f"least G deeper (over ≥ {depth_rules.MIN_PARTNER_STARTS} starts beside a partner) "
         "becomes an 8"
     )
     typer.echo(f"    {'G':>5} {'flips':>5} {'DM':>4} {'CM':>4}  who (partner gap)")
@@ -693,7 +721,8 @@ def _print_depth(c: Calibration, show_all: bool) -> None:
         flips = c.partner_flips(gap)
         dm, cm, _ = c.sizes(gap)
         who = ", ".join(f"{p.name} ({_m(p.depth.partner_gap if p.depth else None)})" for p in flips)
-        typer.echo(f"    {gap_m:>3g} m {len(flips):>5} {dm:>4} {cm:>4}  {who or '-'}")
+        agreed = "  ◄ agreed" if gap_m == depth_rules.PARTNER_GAP_M else ""
+        typer.echo(f"    {gap_m:>3g} m {len(flips):>5} {dm:>4} {cm:>4}  {who or '-'}{agreed}")
     typer.echo("  6s by depth, largest deeper-partner gap first:")
     typer.echo(_TABLE_HEADER)
     for p in c.sixes():
@@ -707,7 +736,10 @@ def _print_depth(c: Calibration, show_all: bool) -> None:
         for p in c.group:
             if p not in c.classified:
                 starts = 0 if p.depth is None else p.depth.starts
-                typer.echo(f"    {p.name:<26} {p.team:<24} formation fallback ({starts} starts)")
+                typer.echo(
+                    f"    {p.name:<26} {p.team:<24} formation fallback ({starts} starts): "
+                    f"{_stored(p)}"
+                )
 
 
 def _relative_of(p: PlayerLine) -> float:
@@ -720,20 +752,25 @@ def report_depth(
     league: Annotated[str, typer.Option(help="PitchAPI league ID, e.g. l_4WFCIZ.")],
     season: Annotated[str, typer.Option(help='Season label, e.g. "2025/2026".')],
     cut_m: Annotated[
-        float,
-        typer.Option(help="Metres in front of the centre-backs that separate 6s from 8s."),
-    ] = depth_rules.DEPTH_CUT_M,
+        float | None,
+        typer.Option(
+            help="Metres in front of the centre-backs that separate 6s from 8s, to try "
+            "another cut (default: the agreed 14)."
+        ),
+    ] = None,
     show_all: Annotated[
         bool, typer.Option("--all", help="Also list every central midfielder.")
     ] = False,
 ) -> None:
     """The 6/8 split for central midfielders (slices 2d-2, 2d-2b): season depth in front of
     their centre-backs, the anchors, the cut, the cross-check and the deeper-partner rule at
-    a few candidate gaps. Read-only."""
+    a few candidate gaps, and whether the stored groups match the rule (D-018). Read-only."""
     try:
         with _read_engine() as engine, Session(engine) as session:
             season_id = find_season(session, league, season).id
-            result = calibrate(session, season_id, cut=cut_m / PITCH_LENGTH_M)
+            result = calibrate(
+                session, season_id, cut=None if cut_m is None else cut_m / PITCH_LENGTH_M
+            )
     except EXPECTED_ERRORS as exc:
         raise _fail(exc) from exc
     typer.echo(f"midfield depth · {league} {season}")
@@ -780,6 +817,13 @@ def _print_aggregate(summary: AggregateSummary) -> None:
         f"  peer groups (≥ {summary.min_minutes} min): {sizes}"
         + (f" · no role {no_role}" if no_role else "")
     )
+    if summary.peer_methods:
+        methods = summary.peer_methods
+        typer.echo(
+            f"  6/8 split (central mids ≥ {summary.min_minutes} min): by depth "
+            f"{methods['depth']} · deeper partner {methods['partner']} · "
+            f"formation {methods['formation']}"
+        )
     sources = summary.role_sources
     typer.echo(
         f"  roles: {sources['starts']} from starts, {sources['listed']} from listed position, "
@@ -855,6 +899,39 @@ def _pct_cell(line: SeasonStatLine, detail: PlayerSeason) -> str:
     return "n/a"
 
 
+def _metres(share: float) -> str:
+    return f"{share * PITCH_LENGTH_M:.1f} m"
+
+
+def _six_or_eight(detail: PlayerSeason) -> str | None:
+    """How a central mid's 6/8 group was decided (D-018); None for everyone else."""
+    if detail.peer_method is None:
+        return None
+    call = "a 6 (DM)" if detail.peer_role == "DM" else "an 8 (CM)"
+    depth = (
+        None
+        if detail.depth is None
+        else f"{_metres(detail.depth)} in front of his centre-backs "
+        f"over {detail.depth_starts} starts"
+    )
+    if detail.peer_method == "formation":
+        text = (
+            f"{call} by formation: {detail.depth_starts or 0} central-mid starts with a heatmap "
+            f"(needs {depth_rules.MIN_DEPTH_STARTS})"
+        )
+        return text + (f"; {depth}" if depth else "")
+    if detail.peer_method == "partner" and detail.partner_gap is not None:
+        return (
+            f"{call} beside a deeper partner: {depth}, but his deepest fellow central mid "
+            f"played {_metres(detail.partner_gap)} deeper over {detail.partner_starts} starts "
+            f"(≥ {depth_rules.PARTNER_GAP_M:g} m makes an 8)"
+        )
+    text = f"{call} by depth: {depth} (cut {depth_rules.DEPTH_CUT * PITCH_LENGTH_M:.3g} m)"
+    if detail.depth is not None and depth_rules.is_borderline(detail.depth):
+        text += f" · borderline (within {depth_rules.BORDERLINE_M:g} m of the cut)"
+    return text
+
+
 def _print_player_season(detail: PlayerSeason) -> None:
     typer.echo(f"{detail.name} ({detail.external_id}) · {detail.competition} {detail.season}")
     teams = ", ".join(f"{name} {minutes} min" for name, minutes, _ in detail.teams)
@@ -865,8 +942,11 @@ def _print_player_season(detail: PlayerSeason) -> None:
         role = "no role (no starts, and the listed position doesn't decide one)"
     else:
         via = "most minutes as a starter" if detail.role_source == "starts" else "listed position"
-        role = f"{detail.primary_role or '?'} (peer group {detail.peer_role}, from {via})"
+        role = f"{detail.primary_role or '?'} (from {via}) · peer group {detail.peer_role}"
     typer.echo(f"  role: {role}")
+    split = _six_or_eight(detail)
+    if split is not None:
+        typer.echo(f"  6 or 8: {split}")
     if detail.roles:
         breakdown = ", ".join(f"{r} {m} min / {n} starts" for r, m, n in detail.roles)
         typer.echo(f"    as a starter: {breakdown}")

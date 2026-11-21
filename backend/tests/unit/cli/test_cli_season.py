@@ -155,7 +155,8 @@ def test_inspect_player_shows_the_season(seeded: None) -> None:
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
     assert "156 min · 2 matches · 2 starts" in lines[1]
-    assert "role: ST (peer group ST, from most minutes as a starter)" in result.output
+    assert "role: ST (from most minutes as a starter) · peer group ST" in result.output
+    assert "6 or 8" not in result.output  # only for central mids
     goals = next(line.split() for line in lines if line.strip().startswith("goals"))
     # Both fixture strikers score 1.154 per 90: tied, so each sits at the midpoint, 50.
     assert goals == ["goals", "2", "1.154", "156", "2", "50th", "(n=2)"]
@@ -325,10 +326,11 @@ def test_check_2c_script_explains_a_missing_season(
 # --- slices 2d-2 / 2d-2b: report depth --------------------------------------------------------
 
 
-def midfield_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def midfield_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, min_starts: int = 1) -> str:
     """The synced fixture season with each 4-2-3-1 side's left-back as a DM, striker as a CM
     and keeper standing in as the centre-back (see tests/unit/metrics/test_depth.py): the DM
-    plays 23.0 m and the CM 78.75 m in front of him, 55.8 m apart. Re-aggregated, with anchors."""
+    plays 23.0 m and the CM 78.75 m in front of him, 55.8 m apart. Re-aggregated, with anchors;
+    returns the aggregate output."""
     invoke("sync", "season", *SEASON_ARGS, "--offline")
     with sqlite3.connect(tmp_path / "scouting.db") as connection:
         for suffix, role in (("LB01", "DM"), ("ST01", "CM"), ("GK01", "CB")):
@@ -343,9 +345,12 @@ def midfield_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "(SELECT player_id FROM player_source_id WHERE external_id = ?)",
                 (name, name.lower(), player),
             )
-    assert invoke("aggregate", *SEASON_ARGS).exit_code == 0
-    monkeypatch.setattr(depth, "MIN_DEPTH_STARTS", 1)
+    monkeypatch.setattr(depth, "MIN_DEPTH_STARTS", min_starts)  # the fixture has 2 starts each
+    monkeypatch.setattr(depth, "MIN_PARTNER_STARTS", min_starts)
     monkeypatch.setattr(depth, "ANCHORS", (("cleo deep", "DM"), ("cyd high", "CM")))
+    result = invoke("aggregate", *SEASON_ARGS)
+    assert result.exit_code == 0, result.output
+    return str(result.output)
 
 
 def test_report_depth(seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -354,13 +359,16 @@ def test_report_depth(seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert result.exit_code == 0, result.output
     out = result.output
     assert "reference: the team's starting centre-backs · cut +50.0 m in front of them" in out
-    assert "4 central midfielders (CM peer group, ≥ 45 min); 4 with ≥ 1 central-mid" in out
+    assert "4 central midfielders (DM + CM peer groups, ≥ 45 min); 4 with ≥ 1 central-mid" in out
     cleo = next(line for line in out.splitlines() if line.startswith("  6 ") and "Cleo" in line)
     # CBs, outfield (second opinion), starts, deepest, partner gap, label, anchor check
     assert "+23.0 m" in cleo and "-27.9 m" in cleo and "-55.8 m" in cleo and "✓" in cleo
     assert "the anchors alone would cut at +50.9 m" in out
-    assert "with the +50.0 m cut: DM 2 · CM 2 · formation fallback 0" in out
-    assert "  2 m     0    2    2  -" in out  # the 6s are the deeper ones: nobody flips
+    assert "with the +50.0 m cut, depth alone: DM 2 · CM 2 · formation fallback 0" in out
+    # Aggregation used the agreed 14 m: all four are 8s by depth (23 m and 78.75 m).
+    assert "stored groups: DM 0 · CM 4 (by depth 4 · deeper partner 0 · formation 0)" in out
+    assert "a trial cut: the stored groups use the agreed one and aren't compared" in out
+    assert "  2 m     0    2    2  -  ◄ agreed" in out  # the 6s are the deeper ones: no flips
     assert "6s by depth, largest deeper-partner gap first:" in out
 
 
@@ -369,8 +377,22 @@ def test_report_depth_partner_flips(
 ) -> None:
     midfield_fixture(tmp_path, monkeypatch)
     out = invoke("report", "depth", *SEASON_ARGS, "--cut-m", "100").output  # all 6s by depth
-    assert "with the +100.0 m cut: DM 4 · CM 0" in out
-    assert "  2 m     2    2    2  Cal Striker (+55.8 m), Cyd High (+55.8 m)" in out
+    assert "with the +100.0 m cut, depth alone: DM 4 · CM 0" in out
+    assert "  2 m     2    2    2  Cal Striker (+55.8 m), Cyd High (+55.8 m)  ◄ agreed" in out
+
+
+def test_report_depth_checks_the_stored_groups(
+    seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    midfield_fixture(tmp_path, monkeypatch)
+    out = invoke("report", "depth", *SEASON_ARGS).output  # the agreed 14 m cut
+    assert "stored groups match the rule" in out
+    cleo = next(line for line in out.splitlines() if line.startswith("  6 ") and "Cleo" in line)
+    assert "  CM     CM  ✗ other side of the cut" in cleo  # label, stored group, anchor check
+    # Stored groups older than the rule (here: the minimum starts goes back up to 5).
+    monkeypatch.setattr(depth, "MIN_DEPTH_STARTS", 5)
+    out = invoke("report", "depth", *SEASON_ARGS).output
+    assert "4 stored groups differ from the rule" in out and "run `scouting aggregate`" in out
 
 
 def test_report_depth_everyone(
@@ -386,3 +408,64 @@ def test_report_depth_everyone(
 def test_report_depth_explains_problems(seeded: None) -> None:
     result = invoke("report", "depth", *SEASON_ARGS)  # not synced, so not aggregated
     assert result.exit_code == 1
+
+
+# --- slice 2d-3: the stored 6/8 split ---------------------------------------------------------
+
+
+def six_or_eight(name: str) -> str:
+    result = invoke("inspect", "player", name, *SEASON_ARGS, "--metric", "goals")
+    assert result.exit_code == 0, result.output
+    lines: list[str] = result.output.splitlines()
+    return next(line for line in lines if "6 or 8:" in line).strip()
+
+
+def test_aggregate_reports_the_split(
+    seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = midfield_fixture(tmp_path, monkeypatch)
+    assert "6/8 split (central mids ≥ 45 min): by depth 4 · deeper partner 0 · formation 0" in out
+    assert "peer groups (≥ 45 min): GK" in out and " CM 4 " in out
+
+
+def test_inspect_player_by_depth(
+    seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    midfield_fixture(tmp_path, monkeypatch)
+    assert six_or_eight("cleo deep") == (
+        "6 or 8: an 8 (CM) by depth: 23.0 m in front of his centre-backs over 2 starts (cut 14 m)"
+    )
+
+
+def test_inspect_player_borderline(
+    seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(depth, "DEPTH_CUT", 23.5 / 105)
+    midfield_fixture(tmp_path, monkeypatch)
+    assert six_or_eight("cleo deep") == (
+        "6 or 8: a 6 (DM) by depth: 23.0 m in front of his centre-backs over 2 starts "
+        "(cut 23.5 m) · borderline (within 1 m of the cut)"
+    )
+
+
+def test_inspect_player_beside_a_deeper_partner(
+    seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(depth, "DEPTH_CUT", 0.9)  # everyone a 6 by depth
+    out = midfield_fixture(tmp_path, monkeypatch)
+    assert "by depth 2 · deeper partner 2 · formation 0" in out
+    assert six_or_eight("cyd high") == (
+        "6 or 8: an 8 (CM) beside a deeper partner: 78.8 m in front of his centre-backs over "
+        "2 starts, but his deepest fellow central mid played 55.8 m deeper over 2 starts "
+        "(≥ 2 m makes an 8)"
+    )
+
+
+def test_inspect_player_by_formation(
+    seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    midfield_fixture(tmp_path, monkeypatch, min_starts=5)
+    assert six_or_eight("cleo deep") == (
+        "6 or 8: a 6 (DM) by formation: 2 central-mid starts with a heatmap (needs 5); "
+        "23.0 m in front of his centre-backs over 2 starts"
+    )

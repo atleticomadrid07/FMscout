@@ -13,6 +13,9 @@ Rules:
   fractions (the exact weighted average for value_is_rate metrics). NULL when undefined.
 - Primary role: most minutes as a starter (ties: more starts, then ROLES order). With no
   starts, the profile's listed slot where every formation agrees on it (positions.py).
+- Central midfielders (peer role DM or CM by formation) are then re-split into 6s and 8s by
+  heatmap depth, or by formation with too few starts (metrics/depth.py, D-018), whatever
+  their minutes, so a player added to a comparison by hand has a group too.
 """
 
 from __future__ import annotations
@@ -37,7 +40,15 @@ from scouting.db.models import (
     Scope,
     Season,
 )
-from scouting.domain.positions import PEER_ROLE, ROLES, PeerRole, Role, listed_slot_roles
+from scouting.domain.positions import (
+    CENTRAL_MID_PEER_ROLES,
+    PEER_ROLE,
+    ROLES,
+    PeerRole,
+    Role,
+    listed_slot_roles,
+)
+from scouting.metrics.depth import classify_central_mids, load_rows
 from scouting.metrics.percentiles import PercentileSummary, build_percentiles
 from scouting.metrics.registry import REGISTRY
 
@@ -58,6 +69,8 @@ class AggregateSummary:
     # Peer-role sizes among players with at least min_minutes; key None = no role.
     peer_roles: Counter[str | None] = field(default_factory=Counter)
     role_sources: Counter[str | None] = field(default_factory=Counter)
+    # How the 6/8 group was decided, among central mids with at least min_minutes.
+    peer_methods: Counter[str] = field(default_factory=Counter)
     percentiles: PercentileSummary | None = None
 
 
@@ -183,6 +196,7 @@ def aggregate_season(session: Session, season_id: int) -> AggregateSummary:
         pid: slot for pid, slot in session.execute(select(Player.id, Player.listed_slot_code))
     }
     min_minutes = default_min_minutes(session, season_id)
+    scope_rows: list[PlayerScope] = []
     starts = func.sum(case((a.is_starter.is_(True), 1), else_=0))
     for player_id, minutes, matches, n_starts, avg_rating, rated in session.execute(
         select(
@@ -199,17 +213,22 @@ def aggregate_season(session: Session, season_id: int) -> AggregateSummary:
         else:
             primary, peer = listed_slot_roles(listed.get(player_id))
             source = "listed" if peer is not None else None
-        session.add(
-            PlayerScope(
-                player_id=player_id, scope_id=scope.id, minutes=minutes, matches=matches,
-                starts=n_starts, primary_role=primary, peer_role=peer, role_source=source,
-                avg_rating=avg_rating, rated_matches=rated, computed_at=computed_at,
-            )
+        scope_row = PlayerScope(
+            player_id=player_id, scope_id=scope.id, minutes=minutes, matches=matches,
+            starts=n_starts, primary_role=primary, peer_role=peer, role_source=source,
+            avg_rating=avg_rating, rated_matches=rated, computed_at=computed_at,
         )  # fmt: skip
+        session.add(scope_row)
+        scope_rows.append(scope_row)
         summary.players += 1
         summary.role_sources[source] += 1
-        if minutes >= min_minutes:
-            summary.peer_roles[peer] += 1
+
+    _split_central_mids(session, season_id, scope_rows)
+    for scope_row in scope_rows:
+        if scope_row.minutes >= min_minutes:
+            summary.peer_roles[scope_row.peer_role] += 1
+            if scope_row.peer_method is not None:
+                summary.peer_methods[scope_row.peer_method] += 1
     session.flush()
 
     zero_ids = list(
@@ -227,3 +246,20 @@ def aggregate_season(session: Session, season_id: int) -> AggregateSummary:
     summary.min_minutes = min_minutes
     summary.percentiles = build_percentiles(session, scope.id, min_minutes, computed_at)
     return summary
+
+
+def _split_central_mids(session: Session, season_id: int, scope_rows: list[PlayerScope]) -> None:
+    """Re-decide every central mid's group (6 = DM, 8 = CM) and store how (D-018)."""
+    central = {r.player_id: r for r in scope_rows if r.peer_role in CENTRAL_MID_PEER_ROLES}
+    if not central:
+        return
+    calls = classify_central_mids(load_rows(session, season_id), sorted(central))
+    for player_id, scope_row in central.items():
+        call = calls[player_id]
+        depth = call.depth
+        scope_row.peer_role = call.peer_role
+        scope_row.peer_method = call.method
+        scope_row.depth = None if depth is None else depth.relative
+        scope_row.depth_starts = 0 if depth is None else depth.starts
+        scope_row.partner_gap = None if depth is None else depth.partner_gap
+        scope_row.partner_starts = 0 if depth is None else depth.comparable

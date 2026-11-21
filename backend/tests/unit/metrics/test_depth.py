@@ -7,13 +7,21 @@ midfielders and anchors.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, get_args
 
 import pytest
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, func, select, update
 from sqlalchemy.orm import Session
 
-from scouting.db.models import Appearance, Player, PlayerSourceId
+from scouting.db.models import (
+    PEER_METHODS,
+    Appearance,
+    PeerGroup,
+    Percentile,
+    Player,
+    PlayerScope,
+    PlayerSourceId,
+)
 from scouting.ingest.season import find_season
 from scouting.metrics import depth
 from scouting.metrics.aggregate import aggregate_season
@@ -23,12 +31,17 @@ from scouting.metrics.depth import (
     Cut,
     DepthReportError,
     MatchDepth,
+    Method,
     PlayerLine,
     SeasonDepth,
     best_cut,
     calibrate,
+    classify,
+    classify_central_mids,
     histogram,
+    is_borderline,
     label_for,
+    lone_pivot_labels,
     match_depths,
     season_depths,
 )
@@ -297,6 +310,7 @@ def fixture_midfield(engine: Engine, *, centre_backs: bool = True) -> None:
 @pytest.fixture
 def fixture_anchors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(depth, "MIN_DEPTH_STARTS", 1)  # the fixture has 1-2 starts each
+    monkeypatch.setattr(depth, "MIN_PARTNER_STARTS", 1)
     monkeypatch.setattr(
         depth,
         "ANCHORS",
@@ -377,3 +391,198 @@ def test_report_needs_heatmap_depths(synced_season: Engine) -> None:
         session.execute(update(Appearance).values(depth=None))
     with pytest.raises(DepthReportError, match="sync season"):
         run(synced_season)
+
+
+# --- the rule (slice 2d-3, D-018) -------------------------------------------------------------
+
+CUT, GAP = 14 / 105, 2 / 105
+
+
+def season(
+    relative: float | None, *, starts: int = 10, comparable: int = 10, gap: float | None = None
+) -> SeasonDepth:
+    return SeasonDepth(1, starts, 90 * starts, relative, comparable, 0, gap)
+
+
+@pytest.mark.parametrize(
+    ("depth_", "call"),
+    [
+        (season(CUT), ("CM", "depth")),  # exactly on the cut: an 8
+        (season(CUT - 1e-9), ("DM", "depth")),
+        (season(0.20, gap=0.30), ("CM", "depth")),  # an 8 by depth: the partner rule isn't needed
+        (season(0.10, gap=GAP), ("CM", "partner")),  # partner exactly G deeper: an 8
+        (season(0.10, gap=GAP - 1e-9), ("DM", "depth")),
+        (season(0.10, gap=None), ("DM", "depth")),  # never beside a partner
+        (season(0.10, gap=0.30, comparable=4), ("DM", "depth")),  # too few starts beside one
+        (season(0.10, starts=4), None),  # too few starts: the formation decides
+        (season(None), None),
+        (None, None),
+    ],
+)  # fmt: skip
+def test_classify(depth_: SeasonDepth | None, call: tuple[str, str] | None) -> None:
+    assert classify(depth_) == call
+
+
+def test_classify_reads_the_agreed_rule() -> None:
+    agreed = [depth.DEPTH_CUT, depth.PARTNER_GAP]
+    assert agreed == pytest.approx([CUT, GAP])
+    assert (depth.MIN_DEPTH_STARTS, depth.MIN_PARTNER_STARTS) == (5, 5)
+    assert classify(season(0.10), cut=0.05) == ("CM", "depth")  # a trial cut
+
+
+def test_methods_match_the_schema() -> None:
+    assert set(get_args(Method)) == set(PEER_METHODS)
+
+
+def test_is_borderline() -> None:
+    assert is_borderline(CUT + 0.9 / 105) and is_borderline(CUT - 0.9 / 105)
+    assert not is_borderline(CUT + 1.1 / 105) and not is_borderline(CUT - 1.1 / 105)
+
+
+def test_formation_fallback_is_a_6_only_as_a_single_pivot() -> None:
+    rows = [
+        # Match 1, team 1: a 4-1-4-1, player 5 the lone DM.
+        row(5, "DM", None), row(6, "CM", None), row(7, "CM", None),
+        # Match 2, team 1: a 4-2-3-1 double pivot (5 and 6), 30 minutes for 5.
+        row(5, "DM", None, match=2, minutes=30), row(6, "DM", None, match=2),
+        # Match 3, team 1: player 8 the lone DM for 45 minutes, but a sub isn't a start.
+        row(8, "DM", None, match=3, minutes=45), row(9, "DM", None, match=3, starter=False),
+        row(8, "CM", None, match=4, minutes=45),
+    ]  # fmt: skip
+    assert lone_pivot_labels(rows) == {
+        5: "DM",  # 90 of 120 minutes as the lone pivot
+        6: "CM",  # a CM, then half of a double pivot
+        7: "CM",
+        8: "CM",  # 45 of 90 minutes: not more than half
+    }
+
+
+def test_classify_central_mids() -> None:
+    three = [*SIDE, row(10, "CM", 0.60)]  # CB line 0.32: 5 at +0.12, 6 at +0.23, 10 at +0.28
+    calls = classify_central_mids(three, [5, 6, 10, 42])
+    assert {pid: (c.peer_role, c.method) for pid, c in calls.items()} == {
+        # One start each (fewer than 5): the formation decides. 5 is the lone DM.
+        5: ("DM", "formation"),
+        6: ("CM", "formation"),
+        10: ("CM", "formation"),
+        42: ("CM", "formation"),  # no central-mid start at all
+    }
+    assert calls[5].depth is not None and calls[5].depth.relative == pytest.approx(0.12)
+    assert calls[42].depth is None
+
+
+def test_classify_central_mids_by_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(depth, "MIN_DEPTH_STARTS", 1)
+    monkeypatch.setattr(depth, "MIN_PARTNER_STARTS", 1)
+    three = [*SIDE, row(10, "CM", 0.60)]
+    calls = classify_central_mids(three, [5, 6, 10])
+    # 5 is 12.6 m in front of the CBs: a 6. 6 (24.2 m) and 10 (29.4 m): 8s by depth.
+    assert {pid: (c.peer_role, c.method) for pid, c in calls.items()} == {
+        5: ("DM", "depth"), 6: ("CM", "depth"), 10: ("CM", "depth"),
+    }  # fmt: skip
+    # With the cut at 30 m all are 6s by depth; 6 and 10 have a partner 11.55 m / 16.8 m deeper.
+    monkeypatch.setattr(depth, "DEPTH_CUT", 30 / 105)
+    calls = classify_central_mids(three, [5, 6, 10])
+    assert {pid: (c.peer_role, c.method) for pid, c in calls.items()} == {
+        5: ("DM", "depth"), 6: ("CM", "partner"), 10: ("CM", "partner"),
+    }  # fmt: skip
+
+
+def test_stored_counts_and_mismatches() -> None:
+    def stored(
+        player: int, relative: float, role: str, method: str, starts: int = 10
+    ) -> PlayerLine:
+        return PlayerLine(
+            player, f"P{player}", "T", SeasonDepth(player, starts, 900, relative, 10, 5, None),
+            stored=role, method=method,
+        )  # fmt: skip
+
+    c = calibration(
+        [
+            stored(1, 0.10, "DM", "depth"),
+            stored(2, 0.20, "CM", "depth"),
+            stored(3, 0.20, "DM", "depth"),  # an 8 by the rule: stale
+            stored(4, 0.10, "CM", "formation", starts=3),
+            stored(5, 0.10, "DM", "depth", starts=3),  # the formation decides now: stale
+        ],
+        cut=CUT,
+    )
+    roles, methods = c.stored_counts()
+    assert (roles["DM"], roles["CM"]) == (3, 2)
+    assert (methods["depth"], methods["formation"]) == (4, 1)
+    assert [p.player_id for p in c.mismatches()] == [3, 5]
+
+
+# --- aggregation stores the split (fixture season) ------------------------------------------
+
+
+def stored_split(engine: Engine) -> dict[str, tuple[Any, ...]]:
+    with Session(engine) as session:
+        return {
+            name: tuple(rest)
+            for name, *rest in session.execute(
+                select(
+                    Player.name, PlayerScope.peer_role, PlayerScope.peer_method,
+                    PlayerScope.depth, PlayerScope.depth_starts, PlayerScope.partner_gap,
+                    PlayerScope.partner_starts,
+                )
+                .join(PlayerScope, PlayerScope.player_id == Player.id)
+                .where(PlayerScope.peer_method.is_not(None))
+            )
+        }  # fmt: skip
+
+
+def test_aggregation_splits_central_mids_by_depth(
+    synced_season: Engine, fixture_anchors: None
+) -> None:
+    fixture_midfield(synced_season)
+    split = stored_split(synced_season)
+    assert set(split) == {"Bea Fullbäck", "Cal Striker", "Cleo Deep", "Cyd High"}
+    role, method, depth_, starts, gap, beside = split["Cleo Deep"]
+    assert (role, method, starts, beside) == ("CM", "depth", 2, 2)  # 23 m: above the 14 m cut
+    assert [depth_, gap] == pytest.approx([0.21875, -0.53125])
+    with Session(synced_season) as session:  # nobody else is touched
+        assert session.scalar(
+            select(func.count()).select_from(PlayerScope).where(
+                PlayerScope.peer_method.is_(None), PlayerScope.peer_role.in_(("DM", "CM"))
+            )
+        ) == 0  # fmt: skip
+
+
+def test_aggregation_applies_the_partner_rule(
+    synced_season: Engine, fixture_anchors: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(depth, "DEPTH_CUT", 0.9)  # everyone a 6 by depth
+    fixture_midfield(synced_season)
+    split = stored_split(synced_season)
+    assert {name: values[:2] for name, values in split.items()} == {
+        "Bea Fullbäck": ("DM", "depth"),
+        "Cleo Deep": ("DM", "depth"),
+        "Cal Striker": ("CM", "partner"),  # his partner 55.8 m deeper
+        "Cyd High": ("CM", "partner"),
+    }
+    with Session(synced_season) as session:
+        sizes = {
+            role: size
+            for role, size in session.execute(select(PeerGroup.peer_role, PeerGroup.size))
+        }
+        dm_rows = session.scalar(
+            select(func.count())
+            .select_from(Percentile)
+            .join(PeerGroup, PeerGroup.id == Percentile.peer_group_id)
+            .where(PeerGroup.peer_role == "DM")
+        )
+    assert sizes["DM"] == 2 and sizes["CM"] == 2  # a DM peer group with its own percentiles
+    assert dm_rows
+
+
+def test_aggregation_falls_back_to_the_formation(synced_season: Engine) -> None:
+    fixture_midfield(synced_season)  # 1-2 starts each, fewer than 5
+    split = stored_split(synced_season)
+    assert {values[1] for values in split.values()} == {"formation"}
+    # The fixture's lineups have no other DM: the relabelled left-backs are lone pivots (6s),
+    # the relabelled strikers CM-role starters (8s).
+    assert {name: values[0] for name, values in split.items()} == {
+        "Bea Fullbäck": "DM", "Cleo Deep": "DM", "Cal Striker": "CM", "Cyd High": "CM",
+    }  # fmt: skip
+    assert split["Cleo Deep"][2] == pytest.approx(0.21875)  # depth still stored for display

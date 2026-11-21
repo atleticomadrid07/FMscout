@@ -6,6 +6,7 @@ Skipped until the first migration exists in migrations/versions/.
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -89,3 +90,32 @@ def test_status_columns_default_to_pending_in_the_database(tmp_path: Path) -> No
         ).one()
     engine.dispose()
     assert tuple(row) == ("pending", "pending", "pending")
+
+
+def test_dm_peer_role_migration_round_trip(tmp_path: Path) -> None:
+    """2d-3 (D-018): the derived peer tables come back empty, with DM allowed; downgrading
+    restores the 7-role CHECK. Uses sqlite3 directly so foreign keys stay off for the
+    bare inserts."""
+    url = _url(tmp_path)
+    config = alembic_config(url)
+    path = tmp_path / "migrated.db"
+    insert = (
+        "INSERT INTO peer_group (scope_id, peer_role, min_minutes, size, computed_at) "
+        "VALUES (1, ?, 0, 0, '2026-11-21 00:00:00')"
+    )
+    command.upgrade(config, "head")
+    command.downgrade(config, "-1")
+    db = sqlite3.connect(path)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(insert, ("DM",))
+    db.execute(insert, ("CM",))
+    db.commit()
+    db.close()
+
+    command.upgrade(config, "head")
+    db = sqlite3.connect(path)
+    assert db.execute("SELECT count(*) FROM peer_group").fetchone() == (0,)
+    db.execute(insert, ("DM",))
+    columns = {row[1] for row in db.execute("PRAGMA table_info(player_scope)")}
+    assert {"peer_method", "depth", "depth_starts", "partner_gap", "partner_starts"} <= columns
+    db.close()
