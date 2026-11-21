@@ -50,10 +50,21 @@ from scouting.ingest.profiles import ProfileSummary, sync_profiles
 from scouting.ingest.progress import Progress
 from scouting.ingest.reference_data import sync_reference_data
 from scouting.ingest.season import SeasonSummary, find_season, sync_season
+from scouting.metrics import depth as depth_rules
 from scouting.metrics.aggregate import (
     AggregateError,
     AggregateSummary,
     aggregate_season,
+)
+from scouting.metrics.depth import (
+    PITCH_LENGTH_M,
+    REFERENCE_LABELS,
+    Calibration,
+    DepthReportError,
+    PlayerLine,
+    calibrate,
+    histogram,
+    label_for,
 )
 from scouting.metrics.percentiles import SMALL_GROUP
 from scouting.metrics.registry import BY_CODE
@@ -75,6 +86,7 @@ EXPECTED_ERRORS = (
     RawStoreError,
     PitchApiError,
     AggregateError,
+    DepthReportError,
 )
 
 OfflineOption = Annotated[
@@ -582,6 +594,150 @@ def report_thresholds(
             cell = "-" if with_data == 0 else f"{ranked}/{with_data}"
             cells.append(f"{cell:>9}")
         typer.echo(f"  {row.code:<24} {row.min_attempts:>5}  " + "".join(cells))
+
+
+# --- midfield depth (slice 2d-2, 2d-2b) ----------------------------------------------------------
+
+DEPTH_BIN: Final = 1 / PITCH_LENGTH_M  # histogram bin: 1 m
+NEAREST_TO_CUT: Final = 10
+
+
+def _m(value: float | None) -> str:
+    """A relative depth (share of the pitch length) in metres."""
+    return "-" if value is None else f"{value * PITCH_LENGTH_M:+.1f} m"
+
+
+def _deepest(p: PlayerLine) -> str:
+    d = p.depth
+    if d is None or d.deepest_share is None:
+        return "-"
+    return f"{d.deepest_share:.0%} of {d.comparable}"
+
+
+_TABLE_HEADER: Final = (
+    f"    {'player':<26} {'team':<24} {'CBs':>9} {'outfield':>9} {'starts':>6} "
+    f"{'deepest':>11} {'partner':>9}  label"
+)
+
+
+def _row(p: PlayerLine, cut: float) -> str:
+    d = p.depth
+    assert d is not None and d.relative is not None
+    return (
+        f"    {p.name:<26} {p.team:<24} {_m(d.relative):>9} {_m(p.outfield):>9} "
+        f"{d.starts:>6} {_deepest(p):>11} {_m(d.partner_gap):>9}  {label_for(d.relative, cut)}"
+    )
+
+
+def _print_depth(c: Calibration, show_all: bool) -> None:
+    typer.echo(
+        f"reference: {REFERENCE_LABELS[depth_rules.DEPTH_REFERENCE]} · cut {_m(c.cut)} in "
+        "front of them (below = 6, at or above = 8)"
+    )
+    typer.echo(
+        "columns: CBs = metres in front of his centre-backs (decides) · outfield = vs the "
+        "outfield players (second opinion) · deepest = how often he was his team's deepest "
+        "central mid · partner = how much deeper his deepest partner played (+ = a deeper "
+        "partner, - = he was the deeper one)"
+    )
+    values = [_relative_of(p) for p in c.classified]
+    typer.echo(
+        f"  {len(c.group)} central midfielders (CM peer group, ≥ {c.min_minutes} min); "
+        f"{len(values)} with ≥ {depth_rules.MIN_DEPTH_STARTS} central-mid starts with a heatmap"
+    )
+    typer.echo("  histogram (1 m bins, labelled by where each starts):")
+    for start, count in histogram(values, DEPTH_BIN):
+        marker = f"  ◄ cut {_m(c.cut)}" if start <= c.cut < start + DEPTH_BIN else ""
+        typer.echo(f"    {start * PITCH_LENGTH_M:>+5.0f} m {'#' * count:<30} {count:>3}{marker}")
+
+    typer.echo("  anchors (your calls, provisional; label = by depth alone):")
+    typer.echo(_TABLE_HEADER)
+    for a in c.anchors:
+        call = "6" if a.label == "DM" else "8"
+        if a.status != "ok" or a.player is None:
+            name = a.player.name if a.player else a.query
+            typer.echo(f"    {call}  {name:<26} not used: {a.status}")
+            continue
+        agrees = label_for(_relative_of(a.player), c.cut) == a.label
+        mark = "✓" if agrees else "✗ other side of the cut"
+        typer.echo(f"  {call}{_row(a.player, c.cut)[3:]}  {mark}")
+    if c.suggested is not None:
+        wrong = ", ".join(c.suggested.wrong) or "none"
+        typer.echo(
+            f"  the anchors alone would cut at {_m(c.suggested.value)} (margin "
+            f"{c.suggested.margin * PITCH_LENGTH_M:.1f} m; wrong side: {wrong})"
+        )
+    dm, cm, fallback = c.sizes()
+    typer.echo(f"  with the {_m(c.cut)} cut: DM {dm} · CM {cm} · formation fallback {fallback}")
+
+    typer.echo(f"  closest to the cut ({NEAREST_TO_CUT}):")
+    typer.echo(_TABLE_HEADER)
+    for p in c.nearest(NEAREST_TO_CUT):
+        typer.echo(_row(p, c.cut))
+    disagree = c.disagreements()
+    typer.echo(
+        f"  cross-check: {len(disagree)} labelled 6 but rarely the deepest midfielder "
+        f"(≤ 30%), or 8 but usually the deepest (≥ 70%)"
+    )
+    for p in disagree:
+        typer.echo(_row(p, c.cut))
+
+    typer.echo(
+        "  deeper-partner rule: a 6 by depth whose deepest partner played on average at "
+        f"least G deeper (over ≥ {depth_rules.MIN_DEPTH_STARTS} starts beside a partner) "
+        "becomes an 8"
+    )
+    typer.echo(f"    {'G':>5} {'flips':>5} {'DM':>4} {'CM':>4}  who (partner gap)")
+    for gap_m in depth_rules.PARTNER_GAP_CANDIDATES_M:
+        gap = gap_m / PITCH_LENGTH_M
+        flips = c.partner_flips(gap)
+        dm, cm, _ = c.sizes(gap)
+        who = ", ".join(f"{p.name} ({_m(p.depth.partner_gap if p.depth else None)})" for p in flips)
+        typer.echo(f"    {gap_m:>3g} m {len(flips):>5} {dm:>4} {cm:>4}  {who or '-'}")
+    typer.echo("  6s by depth, largest deeper-partner gap first:")
+    typer.echo(_TABLE_HEADER)
+    for p in c.sixes():
+        typer.echo(_row(p, c.cut))
+
+    if show_all:
+        typer.echo("  everyone, deepest first:")
+        typer.echo(_TABLE_HEADER)
+        for p in c.classified:
+            typer.echo(_row(p, c.cut))
+        for p in c.group:
+            if p not in c.classified:
+                starts = 0 if p.depth is None else p.depth.starts
+                typer.echo(f"    {p.name:<26} {p.team:<24} formation fallback ({starts} starts)")
+
+
+def _relative_of(p: PlayerLine) -> float:
+    assert p.depth is not None and p.depth.relative is not None
+    return p.depth.relative
+
+
+@report_app.command("depth")
+def report_depth(
+    league: Annotated[str, typer.Option(help="PitchAPI league ID, e.g. l_4WFCIZ.")],
+    season: Annotated[str, typer.Option(help='Season label, e.g. "2025/2026".')],
+    cut_m: Annotated[
+        float,
+        typer.Option(help="Metres in front of the centre-backs that separate 6s from 8s."),
+    ] = depth_rules.DEPTH_CUT_M,
+    show_all: Annotated[
+        bool, typer.Option("--all", help="Also list every central midfielder.")
+    ] = False,
+) -> None:
+    """The 6/8 split for central midfielders (slices 2d-2, 2d-2b): season depth in front of
+    their centre-backs, the anchors, the cut, the cross-check and the deeper-partner rule at
+    a few candidate gaps. Read-only."""
+    try:
+        with _read_engine() as engine, Session(engine) as session:
+            season_id = find_season(session, league, season).id
+            result = calibrate(session, season_id, cut=cut_m / PITCH_LENGTH_M)
+    except EXPECTED_ERRORS as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"midfield depth · {league} {season}")
+    _print_depth(result, show_all)
 
 
 @report_app.command("checksum")

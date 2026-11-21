@@ -22,6 +22,7 @@ from scouting.config.settings import Settings
 from scouting.db.base import make_engine
 from scouting.db.models import Metric
 from scouting.db.schema_version import alembic_config, head_revision
+from scouting.metrics import depth
 
 pytestmark = pytest.mark.skipif(head_revision() is None, reason="no migrations yet")
 
@@ -319,3 +320,69 @@ def test_check_2c_script_explains_a_missing_season(
         runpy.run_path(str(SCRIPT), run_name="__main__")
     assert exit_info.value.code == 1
     assert "isn't in scouting.db" in capsys.readouterr().err
+
+
+# --- slices 2d-2 / 2d-2b: report depth --------------------------------------------------------
+
+
+def midfield_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The synced fixture season with each 4-2-3-1 side's left-back as a DM, striker as a CM
+    and keeper standing in as the centre-back (see tests/unit/metrics/test_depth.py): the DM
+    plays 23.0 m and the CM 78.75 m in front of him, 55.8 m apart. Re-aggregated, with anchors."""
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    with sqlite3.connect(tmp_path / "scouting.db") as connection:
+        for suffix, role in (("LB01", "DM"), ("ST01", "CM"), ("GK01", "CB")):
+            connection.execute(
+                "UPDATE appearance SET role = ? WHERE is_starter AND player_id IN "
+                "(SELECT player_id FROM player_source_id WHERE external_id IN (?, ?))",
+                (role, f"p_A{suffix}", f"p_C{suffix}"),
+            )
+        for player, name in (("p_CLB01", "Cleo Deep"), ("p_CST01", "Cyd High")):
+            connection.execute(
+                "UPDATE player SET name = ?, search_name = ? WHERE id = "
+                "(SELECT player_id FROM player_source_id WHERE external_id = ?)",
+                (name, name.lower(), player),
+            )
+    assert invoke("aggregate", *SEASON_ARGS).exit_code == 0
+    monkeypatch.setattr(depth, "MIN_DEPTH_STARTS", 1)
+    monkeypatch.setattr(depth, "ANCHORS", (("cleo deep", "DM"), ("cyd high", "CM")))
+
+
+def test_report_depth(seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    midfield_fixture(tmp_path, monkeypatch)
+    result = invoke("report", "depth", *SEASON_ARGS, "--cut-m", "50")
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "reference: the team's starting centre-backs · cut +50.0 m in front of them" in out
+    assert "4 central midfielders (CM peer group, ≥ 45 min); 4 with ≥ 1 central-mid" in out
+    cleo = next(line for line in out.splitlines() if line.startswith("  6 ") and "Cleo" in line)
+    # CBs, outfield (second opinion), starts, deepest, partner gap, label, anchor check
+    assert "+23.0 m" in cleo and "-27.9 m" in cleo and "-55.8 m" in cleo and "✓" in cleo
+    assert "the anchors alone would cut at +50.9 m" in out
+    assert "with the +50.0 m cut: DM 2 · CM 2 · formation fallback 0" in out
+    assert "  2 m     0    2    2  -" in out  # the 6s are the deeper ones: nobody flips
+    assert "6s by depth, largest deeper-partner gap first:" in out
+
+
+def test_report_depth_partner_flips(
+    seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    midfield_fixture(tmp_path, monkeypatch)
+    out = invoke("report", "depth", *SEASON_ARGS, "--cut-m", "100").output  # all 6s by depth
+    assert "with the +100.0 m cut: DM 4 · CM 0" in out
+    assert "  2 m     2    2    2  Cal Striker (+55.8 m), Cyd High (+55.8 m)" in out
+
+
+def test_report_depth_everyone(
+    seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    midfield_fixture(tmp_path, monkeypatch)
+    result = invoke("report", "depth", *SEASON_ARGS, "--cut-m", "50", "--all")
+    assert result.exit_code == 0, result.output
+    everyone = result.output.split("everyone, deepest first:")[1].splitlines()[2:]
+    assert [line.split()[0] for line in everyone] == ["Bea", "Cleo", "Cal", "Cyd"]
+
+
+def test_report_depth_explains_problems(seeded: None) -> None:
+    result = invoke("report", "depth", *SEASON_ARGS)  # not synced, so not aggregated
+    assert result.exit_code == 1

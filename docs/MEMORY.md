@@ -1,59 +1,54 @@
 # MEMORY.md: session log
 
-**For a full briefing in a new chat, read CONTEXT.md first.** This file is the session log required by `claude.md` §11. Decisions and their reasons are in DECISIONS.md; the data model is in SCHEMA.md; phase status is in PLAN.md; PitchAPI facts are in PITCHAPI_NOTES.md; past mistakes are in ERRORS.md.
+**For a full briefing in a new chat, read CONTEXT.md first, then the newest session below** (it may be ahead of CONTEXT/PLAN, which are updated at decision points). Decisions and their reasons are in DECISIONS.md; the data model is in SCHEMA.md; phase status is in PLAN.md; PitchAPI facts are in PITCHAPI_NOTES.md; past mistakes are in ERRORS.md.
 
 ## Session 2026-11-18 → 2026-11-20 (Phases 0, 1 and most of 2)
 
 **Completed:**
 - Phase 0: spike, PitchAPI field inventory, schema approved (D-001 to D-011).
 - Phase 1: slices 1a–1d. EPL 2025/26 fully loaded and verified (D-012, D-013).
-- Phase 2, slices 2a and 2b (D-014):
-  - 2a: season totals, exposure minutes, per-90s, rates, primary roles; `scouting aggregate`, `inspect player`. Hand check passed.
-  - 2b: peer groups and midpoint percentiles with minimum attempts; `report peers`, `report thresholds`. 24,893 percentiles across 7 groups; rankings plausible; checksum stable.
+- Phase 2, slices 2a and 2b (D-014): season aggregates, per-90s, roles; peer groups and midpoint percentiles. Hand checks passed; checksum stable.
 - Template principle agreed (D-015): process metrics, not outcomes; the user picks the metrics.
 - CONTEXT.md written as the new-chat briefing.
 
-**Decided this session, not yet in a D-entry:**
+**Decided, not yet in a D-entry:**
 - **Hosting:** stay local for now (noted under D-007).
 - **Project docs:** Claude maintains the `claude/` set; the top-level copies' status is unconfirmed by the user.
 
-## Session 2026-11-20 (evening): slice 2c
+## Session 2026-11-20 (evening): slice 2c (done)
 
-**Built and delivered:**
-- `slice_2c.zip`: `db/checks.py` (read-only checks), `scripts/check_2c.py`, display fix "85th (n=57)". The user ran it on EPL 2025/26; all tests passed on their machine.
-- `slice_2c_close.zip` (407 tests pass here): `was_fouled` `season_null="zero"`; 3-4-2-1 84/86 → W; registry descriptions for `launch_pct`, `claim_rate`, `xa`, `xag`; check 5 (is `/players` xA real xA?) and `--only` in the script; tests updated (fixture peer groups are now GK 4, FB 2, W 2, ST 2; the "NULL is unknown" aggregate tests use `touches`).
+- Built `db/checks.py` + `scripts/check_2c.py` + the "85th (n=57)" display fix; the user ran the checks on EPL 2025/26.
+- **Decided (D-016):** `was_fouled` NULL = 0; `launch_pct`/`claim_rate` are their counts' ratios (templates use `claims_won`); 3-4-2-1's 84/86 → W (3-4-2-1 only); xA over xAG (verified real xA by check 5); no xA on the CB template; 6s and 8s to become separate peer groups by heatmap depth.
+- **Closing run:** peer groups GK 25 · CB 67 · FB 62 · CM 76 · AM 17 · W 65 · ST 33; 25,034 percentiles; Salah `was_fouled` 0.6704 per 90.
 
-**Decided (D-016):** `was_fouled` NULL = 0 (no stored 0 ever; gap vs opponent fouls flat across NULL counts, never negative). `launch_pct`/`claim_rate` = their counts' ratios × 100, rounded to 0.1; templates use `claims_won`. 3-4-2-1's 84/86 → W, **3-4-2-1 only** (user: "3421 only"); 64/66 DM and slot 95 AM kept. **xA** for templates (user supplied the docs' xAG definition; chose xA for coverage). No xA/xAG on the CB template. **6s and 8s as separate peer groups, classed by average position from heatmaps** (user picked approach C + separate percentile groups).
+## Session 2026-11-21: slice 2d (6/8 split)
 
-**Rejected:** NULL as unknown; 3-4-2-1 as AM; also changing 4-3-2-1; xAG; 6/8 by slots only, by stat profile (circular), or one group with separate templates.
+**User decisions (D-017):** AM at 17 accepted with the warning (pooling later). Team-relative depth decides; partner rank is a cross-check. ≥ 5 central-mid starts with heatmaps to classify by depth, else formation fallback. Plan approved as steps, **one zip per step, each explained; "go" before each step**. Anchors (provisional, "don't take my words as 100%"): 6s Caicedo, T. Adams, Xhaka, Garner, Baleba, Berge, Ugarte; 8s Bruno G., Enzo F., A. Scott, Tielemans, Stach, Gallagher, Mac Allister.
 
-**2c closing run (user's machine, 2026-11-20 23:07), all as expected:**
-- `sync season --offline --renormalize`: 380/380 matches, 849,359 stat values (unchanged). **Peer groups (≥ 855 min): GK 25 · CB 67 · FB 62 · CM 76 · AM 17 · W 65 · ST 33** (before: CM 75, AM 25, W 57, ST 34). 25,034 percentiles. Roles unchanged (474 starts / 19 listed / 44 none).
-- Salah `was_fouled`: 16 in 2,148 min = 0.6704 per 90 (as predicted); 13th among 65 Ws.
-- **Check 5: `/players` `expected_assists` is real xA.** In rows with 0 key passes, xa > 0 in 58.8% (17.9% of season xA); xag > 0 in 0.0%. Against `/players` `chances_created` = 0: xa > 0 in 58.0%, xag > 0 in 1.4%. Label it "xA"; the docs' "not served" note refers to the advanced endpoint.
+**Heatmap spike** (`spike_2d_heatmaps.zip`): per-player heatmaps, one request per match, `acting_ltr` = every team attacks towards high x. Details in PITCHAPI_NOTES.
 
-## Session 2026-11-21: slice 2d (6/8 split), spike and design
+**2d-1 DONE** (`slice_2d1.zip`): migration (3 `ADD COLUMN`s) applied; online `sync season` made exactly 380 requests, all heatmaps `ok`; spot checks matched the spike (Acheampong 0.379 / 139 actions; Onana 0.443 / 65).
 
-**User decisions (2026-11-21):**
-- **AM at 17: accepted with the small-group warning** ("we'll have more CAMs eventually": pooling in Phase 5).
-- **Depth measure: team-relative depth decides; partner-relative depth rank is the cross-check.**
-- **Anchors (user's football judgement, EPL 2025/26):** 6s (DM): Moisés Caicedo, Tyler Adams, Granit Xhaka, James Garner, Carlos Baleba, Sander Berge, Manuel Ugarte. 8s (CM): Bruno Guimarães, Enzo Fernández, Alex Scott, Youri Tielemans, Anton Stach, Conor Gallagher, Alexis Mac Allister. Same-team pairs: Caicedo/Enzo (Chelsea), Adams/Scott (Bournemouth). Check each is in the central-mid peer group with enough minutes before using it (Tielemans started at 85, AM, in the spike's Villa match).
+**2d-2 DONE** (`slice_2d2.zip`: `metrics/depth.py` + `scouting report depth`, 469 tests). **User's run on EPL 2025/26 (2026-11-21 13:46):**
+- **No natural gap:** one smooth bell under both references; ~a dozen players within 1 m of any cut.
+- **outfield reference:** cut −0.014 (−1.5 m), margin 0.002; anchor gap Xhaka −1.7 m vs Mac Allister −1.3 m (0.4 m); DM 33 · CM 42 · fallback 1 (Bergvall, 4 starts); Garner (+1.5 m) on the wrong side; Rice DM (−2.5 m).
+- **centre_backs reference:** cut +0.133 (+13.9 m), margin 0.012; anchor gap Berge +12.6 m vs Scott +15.2 m (2.6 m); DM 29 · CM 46 · fallback 1; Garner (+17.8 m) on the wrong side; **Rice CM (+14.3 m), correct as Arsenal's left 8.**
+- Cross-check disagreement under both: **Bernardo Silva** (DM by depth: +12.8 m from CBs; deepest of City's mids only 13% of 23 starts; Rodri/Nico González deeper).
+- Notable labels (outfield `--all`): deepest Adams, Bogarde, Zubimendi, Rodri, Nico González…; highest Hannibal, Munetsi, Stach, Foden, Reijnders…
 
-**Heatmap spike (`spikes/heatmap_spike.py`, delivered as `spike_2d_heatmaps.zip`; user ran it 2026-11-21 on m_0kLiyr Chelsea v Palace, m_1t3Zja Bournemouth v Liverpool, m_2P1f3f Villa v Newcastle; 9 requests, all HTTP 200): GO for approach C.**
-- `GET /v1/matches/{id}/heatmaps` returns **one response per match with a grid for every player who played** (28/28, 31/31, 26/26) plus one per team. Shape: `{match_id, grid: {length: 16, width: 12, frame, cell_length_m: 6.5625, cell_width_m: 5.667}, teams: [{team{id,name}, side, actions, cells}], players: [{player{id,name,shirt_number}, team{id,name}, side, actions, cells: [[x, y, n], …]}]}`. Indices 0..15 × 0..11 (105 × 68 m pitch).
-- **Default frame `acting_ltr` = every team attacking towards high x** (keepers 0.07–0.13, strikers 0.52–0.76). `frame=home_ltr` flips the away team (Palace keeper 0.927). Use the default.
-- **Lateral axis: low y = the team's RIGHT** (Reece James 0.29, Cucurella 0.76, Salah 0.22, Gakpo 0.79): the opposite of lineup `pitch_y` (high = right). Matters for Phase 8 visuals.
-- **"actions" ≈ 1.1–1.2 × `/players` touches** (median 1.17, 1.11, 1.16; range 0.50–1.52): on-ball events, including some that aren't touches.
-- **Cost: 1 request per match** → +380 per EPL season (~6.5 min at 1 req/s).
-- Pass network (`/advanced/network`): per team, `nodes` with `avg_x`/`avg_y` (metres), `passes`, `degree`, `betweenness`…, only **until the first substitution** (`window.kind = first_substitution`), starters only. `avg_x` correlates r = 0.94–0.97 with heatmap depth. Not needed (heatmaps cover all minutes and players), but a valid fallback.
-- **Anchor pairs, single match:** Caicedo x 0.470 (rel −0.059) vs Enzo 0.545 (+0.016) ✓; Adams 0.391 (−0.082) vs Scott 0.525 (+0.051) ✓. Other mids (rel to outfield mean): Hughes −0.053 / Wharton +0.035 (Palace); Mac Allister −0.002 / Szoboszlai +0.006 (Liverpool, near-equal); Onana −0.024 / Kamara −0.012 (Villa, two 6s); Tonali (single pivot) −0.004, Joelinton +0.008, Bruno +0.058 (Newcastle). Partner rank alone would have called Kamara and Szoboszlai 8s: confirms it's only a cross-check. Gaps are small (≈ 0.01–0.13 of pitch length) in single matches; season averaging is essential.
+**User decisions after the report (2026-11-21 13:49):**
+1. Asked whether the two references can be combined → Claude's answer: a simple average of the two (from the report's rounded values) narrows the anchor gap to ≈ 1.7 m (Xhaka ≈ 5.4 m vs Mac Allister ≈ 7.1 m) and flips Rice back to DM, so it dilutes the better signal; recommended the **centre-back line alone, with the outfield value kept visible as a second opinion**. Waiting for the user to confirm.
+2. **Cut: 14 m in front of the centre-backs** (0.1333 of the pitch length) — recommended, accepted.
+3. **Garner moves to the 8 anchors** — accepted.
+4. **Depth decides, but Bernardo should be an 8**; the user asked for a way to detect "a significantly deeper midfielder". Claude proposed a **partner gap** rule: per match, his depth minus the depth of his deepest fellow central mid; season minutes-weighted; a player labelled DM by depth whose deepest partner is on average ≥ G metres deeper becomes CM ("an 8 beside a deeper 6"). Uses the size of the gap, not the rank, so close double 6s (Onana/Kamara) stay DM. G to be chosen from data: proposed step **2d-2b** = extend `report depth` (centre-back reference + 14 m cut + Garner as 8 as defaults; partner gap column; who flips at candidate G of 2/3/4/5 m). Waiting for "go".
+5. **Store season depth and the decision method; show depth with the label (e.g. "DM · 12.6 m in front of his CBs", borderline within ~1 m).** User: **in the UI (Phase 4) this display must be removable/toggleable in case it looks out of shape.**
 
-**Next:** Claude presented the 2d design (2026-11-21) for approval: three sub-slices (2d-1 ingest heatmaps and store per-appearance depth; 2d-2 read-only calibration report; 2d-3 classification, DM peer group, migration). Waiting for the user's answers. All docs (PLAN, DECISIONS D-016 addendum + D-017, SCHEMA, PITCHAPI_NOTES, CONTEXT) to be updated once the design is approved, together with 2c's closing numbers.
+**Record as D-018 once G is chosen** (then update PLAN, CONTEXT, DECISIONS, SCHEMA).
 
-**Process note:** running `ruff format` on whole folders reformatted `settings.py` (an unrelated file); restored from the original. Format only the files being changed.
+**Process notes:** run `ruff format` only on changed files (it once reformatted `settings.py`). Test throwaway scripts on fake shapes too. The fixture reuses player names across teams: rename players in tests that look anchors up by name.
 
 ## How the user works (summary; full list in CONTEXT.md §7)
 
-- Plan before code; options with a recommendation; wait for "go". "Don't start coding first, walk me through the thought process" = design discussion only.
-- Zips of changed files for review; the user generates and runs migrations.
+- Plan before code; options with a recommendation; wait for "go". "Walk me through the thought process" = design discussion only.
+- One zip per approved step, each explained; the user generates and runs migrations.
 - Terminal steps: one block per step, no `#` comments, no `<placeholders>` (zsh).
