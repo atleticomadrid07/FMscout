@@ -14,7 +14,7 @@ row and a keeper gets no `shots` row (no row at all, not a 0).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final, Literal
 
 Source = Literal["pitchapi_players", "pitchapi_advanced", "fm"]
@@ -34,6 +34,11 @@ APPLIES_TO: Final[tuple[AppliesTo, ...]] = ("all", "outfield", "gk")
 # - "zero": a known zero the provider sends as null (xGOT with no shot on target). The
 #   match adds 0 to the total and its minutes count.
 SeasonNull = Literal["skip", "zero"]
+
+# Which way is good, for colouring percentiles in the UI (D-014). Percentiles are stored raw;
+# the UI flips "lower". "none" = a style metric, never coloured good or bad.
+Direction = Literal["higher", "lower", "none"]
+DIRECTIONS: Final[tuple[Direction, ...]] = ("higher", "lower", "none")
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +61,9 @@ class MetricDef:
     # so rate_from_sums gives the exact weighted average later.
     value_is_rate: bool = False
     season_null: SeasonNull = "skip"
+    # Fractions only: fewest season attempts (or weight) for a percentile (D-014).
+    min_attempts: int | None = None
+    no_direction: bool = False  # a style metric (see Direction)
 
     @property
     def is_fraction(self) -> bool:
@@ -68,6 +76,12 @@ class MetricDef:
     @property
     def aggregation(self) -> Aggregation:
         return "rate_from_sums" if self.is_fraction else "sum"
+
+    @property
+    def direction(self) -> Direction:
+        if self.no_direction:
+            return "none"
+        return "higher" if self.higher_is_better else "lower"
 
     @property
     def per90_allowed(self) -> bool:
@@ -177,7 +191,37 @@ def _gk_rate(code: str, label: str, key: str, weight_key: str, desc: str, unit: 
 
 # Every source key below was seen in the Phase 0 spike (PITCHAPI_NOTES). v0 (slice 1c) had
 # the first 18; slice 1d brings the registry to 90. Codes are stable: never rename or reuse.
-REGISTRY: Final[tuple[MetricDef, ...]] = (
+# --- percentile eligibility (D-014): tune here -------------------------------------------------
+#
+# Fewest season attempts for a success-rate percentile. Starting values approved 2026-11-20;
+# `scouting report thresholds` shows how many players each one excludes per peer group.
+MIN_ATTEMPTS: Final[dict[str, int]] = {
+    "passes_completed": 200,
+    "long_balls_completed": 20,
+    "crosses_completed": 20,
+    "dribbles_completed": 15,
+    "take_ons_completed": 15,
+    "ground_duels_won": 30,
+    "aerials_won": 15,
+    "claims_won": 10,
+    "claim_rate": 10,
+    "distribution_accuracy": 100,
+    "launch_pct": 100,
+    "avg_pass_length": 100,
+}
+# Style metrics: a percentile, but no "good" or "bad" colour.
+NO_DIRECTION: Final[frozenset[str]] = frozenset({"launch_pct", "avg_pass_length", "corners"})
+
+
+def _tuned(metric: MetricDef) -> MetricDef:
+    return replace(
+        metric,
+        min_attempts=MIN_ATTEMPTS.get(metric.code),
+        no_direction=metric.code in NO_DIRECTION,
+    )
+
+
+_DEFINITIONS: Final[tuple[MetricDef, ...]] = (
     # --- v0 (slice 1c) ---------------------------------------------------------------------
     _count("goals", "Goals", _P, "goals", "outfield", "Goals scored."),
     _count("assists", "Assists", _P, "assists", "outfield", "Assists."),
@@ -190,7 +234,8 @@ REGISTRY: Final[tuple[MetricDef, ...]] = (
     _model("npxg", "Non-penalty xG", _P, "expected_goals_non_penalty", "outfield",
            "Expected goals excluding penalties (PitchAPI's model).", "xG"),
     _model("xa", "xA", _P, "expected_assists", "outfield",
-           "Expected assists from /players (PitchAPI's model). See also xag.", "xA"),
+           "Expected assists from /players (model). The template choice over xag: wider "
+           "coverage, and the same endpoint as npxg (D-016). See also xag.", "xA"),
     _model("xgot", "xGOT", _P, "expected_goals_on_target_variant", "outfield",
            "Expected goals on target. NULL when the player had no shot on target, which "
            "counts as 0 in season totals.", "xG",
@@ -203,9 +248,10 @@ REGISTRY: Final[tuple[MetricDef, ...]] = (
               "Successful dribbles out of attempted dribbles."),
     _count("tackles", "Tackles", _P, "matchstats.headers.tackles", "all",
            "Tackles. Same value as the advanced endpoint's defending.tackles (spike: 277/277)."),
-    _count("was_fouled", "Fouls won", _P, "was_fouled", "outfield",
-           "Times fouled. The provider sends null instead of 0 for many rows, kept as NULL.",
-           absence="null"),
+    MetricDef("was_fouled", "Fouls won", "count", _P, "was_fouled", "null", "outfield",
+              "Times fouled. PitchAPI sends null, never 0, for a player who wasn't fouled: "
+              "stored as NULL, counted as 0 in season totals (2c check, D-016).",
+              season_null="zero"),
     _count("key_passes", "Key passes", _A, "passing.key_passes", "outfield",
            "Passes leading to a shot (advanced). Equal to the advanced chances_created."),
     _count("progressive_passes", "Progressive passes", _A, "passing.progressive_passes", "all",
@@ -245,8 +291,9 @@ REGISTRY: Final[tuple[MetricDef, ...]] = (
            "outfield", "Passes into the final third."),
     _count("corners", "Corners taken", _P, "corners", "outfield", "Corners taken."),
     _model("xag", "xAG", _A, "creation.xag", "outfield",
-           "Expected assisted goals from the advanced endpoint (PitchAPI's model). How it "
-           "differs from xa isn't documented; compare before choosing one.", "xA"),
+           "Expected assisted goals from the advanced endpoint (PitchAPI's model): the xG of "
+           "the shots a player's passes produced, credited to the passer; penalties excluded. "
+           "Kept as an alternative to xa; never combined with it (D-016).", "xA"),
     _count("sca", "Shot-creating actions", _A, "creation.sca", "outfield",
            "Actions leading to a shot. Player SCA sums short of the team total (foul_drawn "
            "is team-only)."),
@@ -381,17 +428,19 @@ REGISTRY: Final[tuple[MetricDef, ...]] = (
              "Same scale as PitchAPI sends it.", "rate"),
     _gk_rate("launch_pct", "Launch share", "goalkeeping.launch_pct", "goalkeeping.distributions",
              "Per-match share of launched distributions, weighted by distributions. Equals "
-             "launches / distributions if that's how PitchAPI defines it; check in Phase 2.",
+             "launches / distributions x 100, rounded to 0.1 (2c check: 760/760, D-016).",
              "rate"),
     _gk_rate("claim_rate", "Claim rate", "goalkeeping.claim_rate", "goalkeeping.claims",
              "Per-match claim success rate, weighted by claims. NULL rate with claims = 0 "
-             "contributes nothing. Same information as claims_won.", "rate"),
+             "contributes nothing. Equals claims_won / claims x 100, rounded to 0.1 (2c "
+             "check: 419/419); templates use claims_won (D-016).", "rate"),
     _gk_rate("avg_pass_length", "Average pass length", "goalkeeping.avg_pass_length",
              "goalkeeping.distributions",
              "Per-match average pass length, weighted by distributions (an approximation: "
              "which passes it averages isn't documented).", "m"),
 )  # fmt: skip
 
+REGISTRY: Final[tuple[MetricDef, ...]] = tuple(_tuned(m) for m in _DEFINITIONS)
 BY_CODE: Final[dict[str, MetricDef]] = {m.code: m for m in REGISTRY}
 
 # Every /players key seen in the Phase 0 spike (PITCHAPI_NOTES). A key outside this set and

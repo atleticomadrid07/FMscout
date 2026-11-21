@@ -28,6 +28,8 @@ def _metric_values(d: MetricDef) -> dict[str, object]:
         "is_model_output": d.is_model_output,
         "higher_is_better": d.higher_is_better,
         "description": d.description,
+        "min_attempts": d.min_attempts,
+        "direction": d.direction,
     }
 
 

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from scouting.adapters.pitchapi.schemas import LeaguesPayload, MatchListPayload
+from scouting.adapters.pitchapi.schemas import HeatmapsPayload, LeaguesPayload, MatchListPayload
 
 
 def test_leagues_fixture_parses(load_fixture: Any) -> None:
@@ -110,3 +110,39 @@ def test_league_without_seasons_raises(load_fixture: Any) -> None:
     raw = load_fixture("leagues.json")["leagues"][0] | {"seasons": []}
     with pytest.raises(ValidationError):
         LeaguesPayload.model_validate({"leagues": [raw]})
+
+
+# --- heatmaps (slice 2d) --------------------------------------------------------------------
+
+
+def test_heatmaps_fixture_parses(load_fixture: Any) -> None:
+    payload = HeatmapsPayload.model_validate(load_fixture("match_heatmaps.json"))
+    assert payload.match_id == "m_FIXT01"
+    assert (payload.grid.length, payload.grid.width, payload.grid.frame) == (16, 12, "acting_ltr")
+    assert len(payload.players) == 7  # everyone who played; the unused sub has no grid
+    lb = next(p for p in payload.players if p.player.id == "p_FXLB01")
+    assert (lb.team.id, lb.actions, lb.cells) == ("t_FIXTA1", 8, [(4, 10, 6), (6, 10, 2)])
+
+
+def _heatmaps_with(load_fixture: Any, change: Any) -> Any:
+    data = copy.deepcopy(load_fixture("match_heatmaps.json"))
+    change(data)
+    return data
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        # depth assumes every team attacks towards high x; another frame would flip half
+        (lambda d: d["grid"].update(frame="home_ltr"), "expected frame 'acting_ltr'"),
+        (lambda d: d["players"][0]["cells"].append([16, 0, 1]), "outside the 16 x 12 grid"),
+        (lambda d: d["players"][0]["cells"].append([0, 12, 1]), "outside the 16 x 12 grid"),
+        (lambda d: d["players"][0]["cells"].append([0, 0, -1]), "greater than or equal to 0"),
+        (lambda d: d["players"].append(copy.deepcopy(d["players"][0])), "has two heatmaps"),
+        (lambda d: d["players"][0]["player"].update(id="t_WRONG1"), "starting with 'p_'"),
+        (lambda d: d["grid"].pop("length"), "length"),
+    ],
+)
+def test_heatmaps_bad_input_raises(load_fixture: Any, change: Any, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        HeatmapsPayload.model_validate(_heatmaps_with(load_fixture, change))

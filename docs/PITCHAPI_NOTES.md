@@ -7,10 +7,12 @@ Verified facts about PitchAPI that this project depends on. Written in our own w
 - The source of the Python SDK `pitchapi` 0.1.6 (MIT license)
 - Live responses from the Phase 0 spike, 2026-11-19 (marked "spike")
 - The full EPL 2025/26 crawl, 2026-11-20 (marked "crawl"; see its section below)
+- The slice 2c data checks on that crawl, 2026-11-20 (marked "2c"; `scripts/check_2c.py`, D-016)
+- The slice 2d heatmap spike, 2026-11-21 (marked "2d spike"; `spikes/heatmap_spike.py`, 3 EPL matches, D-017)
 
-**Spike sample:** 9 matches. Five from EPL 2025/26 (`m_2RfPIg`, `m_0kLiyr`, `m_0is5BY`, `m_1t3Zja`, `m_1gBZfF`), plus the most recent 2026/27 match from each of Serie A (`m_1TtlDk`), LaLiga (`m_1FwCGv`), Bundesliga (`m_1yCXSs`) and Ligue 1 (`m_3xBldf`).
+**Spike sample:** 9 matches. Five from EPL 2025/26 (`m_2RfPIg`, `m_0kLiyr`, `m_0is5BY`, `m_1t3Zja`, `m_1gBZfF`), plus the most recent 2026/27 match from each of Serie A (`m_1TtlDk`), LaLiga (`m_1FwCGv`), Bundesliga (`m_1yCXSs`) and Ligue 1 (`m_3xBldf`). The 2d spike used `m_0kLiyr` (Chelsea v Palace), `m_1t3Zja` (Bournemouth v Liverpool) and `m_2P1f3f` (Villa v Newcastle).
 
-**Last checked:** 2026-11-20
+**Last checked:** 2026-11-21
 
 ## Basics
 
@@ -25,7 +27,7 @@ Verified facts about PitchAPI that this project depends on. Written in our own w
 | IDs | Prefix + `_` + 6 base62 characters (`m_`, `p_`, `t_`, `l_`, `s_`). Opaque and stable. Shot IDs are unique only within their match |
 | Wrapping (spike) | Inconsistent between endpoints. `/leagues` → `{"leagues": [...]}`; match list → `{"league": {...}, "matches": [...]}`; `/advanced/players` → `{"players": [...]}`; but `/matches/{id}/players` → **a bare list**. Model each endpoint's shape explicitly |
 
-## Endpoints we plan to use
+## Endpoints we use
 
 | Endpoint | Used for | Phase |
 |---|---|---|
@@ -34,16 +36,17 @@ Verified facts about PitchAPI that this project depends on. Written in our own w
 | `GET /v1/matches/{id}/players` | Per-match player stat lines, including the match rating | 1 |
 | `GET /v1/matches/{id}/advanced/players` | xT, VAEP, progressive passes and carries, SCA/GCA, xAG, defending, goalkeeping | 1 |
 | `GET /v1/matches/{id}/lineups` | Per-match position (see below) | 1 |
+| `GET /v1/matches/{id}/heatmaps` | Each player's depth on the pitch, for the 6/8 split (default frame only) | 2d (built in 2d-1) |
 | `GET /v1/players/{id}` | Profile: full name, short name, shirt number, `position_id`, country, image | 1 |
 | `GET /v1/teams/{id}` | Team image/details. Probably unnecessary: the match list already carries team `id`, `name` and `image_url` | 1 (maybe) |
-| `GET /v1/matches/{id}/shots`, `/heatmaps`, `/advanced/network` | Rich visuals | 8 |
+| `GET /v1/matches/{id}/shots`, `/advanced/network` | Rich visuals | 8 |
 | `GET /v1/matches/{id}/advanced`, `/stats` | Team pages | 5 |
 
 **Not used:**
 - `/live`. It exists (added Nov 14, 2026, limited to 60 requests/minute), but we work from post-match data only (D-005).
 - `/players/halves`.
 
-**Crawl cost per season (spike-based):** 1 match-list request, plus 3 per match (players, advanced, lineups), plus first-time player profiles. That's about 1,141 + profiles for an EPL season.
+**Crawl cost per season:** 1 match-list request, plus **4 per match** (players, advanced, lineups, heatmaps), plus first-time player profiles. That's about 1,521 + profiles for an EPL season.
 
 ## Leagues (`/v1/leagues`), spike
 
@@ -102,6 +105,7 @@ Post-MVP candidates from the same listing: Eredivisie `l_4H43wr`, Liga Portugal 
 - **Duplicate keys across groups:** 14 keys appear in two groups (`defensive_actions`, `touches`, `clearances`, `recoveries`, `interceptions`, `duel_won`, …). Across 277 rows the two copies never disagreed. Dedupe, and still fail loudly on a conflict.
 - **Rating:** `rating_title` is present for the top 5 (26–31 rated players per match). It's **absent for players with ≤ 8 minutes** (18 rows: 1–8 minutes). An absent rating means "not rated", **not 0**. Match-level only; never per-90. The docs say ratings are missing entirely in the 26 leagues rebuilt in Sept 2026, none of which is in the top 5.
 - **Not in the advanced endpoint, so this endpoint is still needed:** player xG, npxG (`expected_goals_non_penalty`), xGOT, xA, shots, goals, touches, touches in the opposition box, recoveries, fouls, and all goalkeeper shot-stopping.
+- **✅ `expected_assists` is real xA (2c, check 5):** in EPL rows where a player made no key pass, xA is still above 0 in 58.8% (17.9% of season xA), so it credits completed passes whether or not a shot followed. The docs' note that xA "is not served" refers to the advanced endpoint. It's the template choice over xAG (D-016).
 
 ### What a missing key or null means in `/players` (spike-verified, 258 outfield rows)
 
@@ -112,7 +116,7 @@ There's no single rule; it depends on the key. Every metric in our registry gets
 | Always present, zeros explicit | `goals`, `assists`, `minutes_played`, `matchstats.headers.tackles`, `interceptions`, `clearances`, `dispossessed`, `dribbled_past`, `fouls`, `recoveries`, `shot_blocks`, `touches`, `touches_opp_box`, `chances_created`, `defensive_actions`, `aerials_won`, `accurate_passes` | Value as given |
 | **Omitted when zero** (never present with 0, often absent) | `total_shots`, `expected_goals`, `expected_goals_non_penalty`, `expected_assists`, `xg_and_xa`, `blocked_shots`, `big_chance_created_team_title`, `big_chance_missed_title`, `Offsides`, `corners`, `duel_won`, `duel_lost`, `headed_clearance`, `passes_into_final_third`, `shots_woodwork`, `clearance_off_the_line`, `last_man_tackle`, `errors_led_to_goal` | Missing → **0** (for played rows). Evidence: no scorer lacks `total_shots`, and these keys are never present with value 0 |
 | **Present only when the parent count > 0** | `ShotsOnTarget`, `ShotsOffTarget`, `shot_accuracy` (when the player shot); fraction keys `accurate_crosses`, `dribbles_succeeded`, `long_balls_accurate`, `ground_duels_won` (when attempted) | Missing → successes 0, attempts 0, **success rate null**. Store numerator and denominator separately; compute rates from season sums |
-| **Null value** | `was_fouled` (null in 130 rows, never 0); `expected_goals_on_target_variant` (xGOT, null in 69 rows, about the players whose shots were all off target) | Store null. `was_fouled` null may really mean 0: check it by comparing team sums against the opponents' `fouls`. Until then, treat it as unknown. xGOT null = "no shots on target" → contributes 0 to season sums |
+| **Null value** | `was_fouled`; `expected_goals_on_target_variant` (xGOT, null for players whose shots were all off target) | Stored as null. **Both null values mean 0** and count as 0 in season totals (`season_null = "zero"`). xGOT: no shot on target. **`was_fouled` (2c, D-016):** a 0 never appears in 10,725 EPL outfield rows (5,792 null); per match, the team's `was_fouled` with null as 0 matches the opponent's `fouls` (gap 0 in 54.7%, ≤ 1 in 88.2%, never negative), and the gap doesn't grow with the number of nulls. The steady ~0.6 shortfall per team-match is fouls on keepers (no `was_fouled` row for keepers) and, probably, fouls with no fouled player |
 | **Not rated** | `rating_title` | Missing → null, and the match doesn't count toward the rating average |
 
 Keys aren't consistently named: `ShotsOnTarget`, `ShotsOffTarget` and `Offsides` are PascalCase. The registry maps every raw key to a canonical metric ID.
@@ -127,6 +131,7 @@ Keys aren't consistently named: `ShotsOnTarget`, `ShotsOffTarget` and `Offsides`
 | Interceptions | `interceptions` | `defending.interceptions` | **101 differ**, advanced usually higher (e.g. 3 vs 5): a different definition |
 | Clearances | `clearances` | `defending.clearances` | **21 differ**, mostly by 1, in both directions |
 | Chances created | `chances_created` | `creation.chances_created` (= `key_passes`) | **20 differ**, in both directions |
+| xA vs xAG (2c, full season) | `expected_assists` | `creation.xag` | **Different models:** equal to 2 decimals in 28.5% of 10,671 rows, r = 0.77; season totals 682 vs 678. 54 rows have xA but no advanced row |
 | **Minutes** | `minutes_played` | `minutes_played` | **269 differ.** `/players` gives 90 for a full match; advanced gives the true time including stoppage (e.g. 98). Subs are often off by 1 |
 
 **Rules:**
@@ -152,14 +157,46 @@ Keys aren't consistently named: `ShotsOnTarget`, `ShotsOffTarget` and `Offsides`
   - `passing.pass_accuracy`: null in 2 rows (players with no passes, so the denominator was empty).
   - `goalkeeping`: the whole object is null for outfield players (259 rows). It's present in exactly 18 rows, the 2 starting keepers × 9 matches. That confirms the docs.
   - `goalkeeping.claim_rate`: null in 6 of 18 rows (keepers with no claims). Null ≠ 0 holds.
+- **✅ Keeper rates are their counts' ratios (2c, all 760 EPL keeper rows):** `launch_pct` = `launches` ÷ `distributions` × 100 and `claim_rate` = `claims_won` ÷ `claims` × 100, both rounded to one decimal (e.g. 31.25 → 31.2, 66.667 → 66.7). Percent scale, 0–100.
 - **✅ `sca_breakdown` is sparse, and a missing key means 0.** Keys seen: `pass_live`, `pass_dead`, `take_on`, `shot`, `defensive`. Keys with a count of 0 are omitted. The breakdown summed exactly to `sca` in 277/277 rows. This is the **one place where missing = 0**; everywhere else missing means "unavailable". `foul_drawn` never appeared at player level, which is consistent with the docs (team-only).
 - **Numbers can be `int` or `float`** in the same field (e.g. `xg_chain`, `carry_distance`). Parse them as float.
 - **✅ `chances_created` == `key_passes` in 277/277 rows.** The "assists + key passes" definition in the docs is wrong for the data. Use `key_passes` only; never add the two together. (`/players` also has a `chances_created` key. It differs from this one in 20/277 rows, so it's stored as a separate, alternative metric and never added to `key_passes`; D-012.)
-- **Model outputs** (flag these in the UI): xT, VAEP, PV and xAG; xG chain and xG buildup are built on shot xG.
+- **Model outputs** (flag these in the UI): xT, VAEP, PV and xAG; xG chain and xG buildup are built on shot xG. **xAG** (docs, via the user): the xG of the shots a player's passes produced, credited to the passer; penalties excluded, since a penalty has no assist.
 - **Carries are synthesized.** The source has no carry event; one is inserted between consecutive actions over 5 m.
 - **Don't double-count:** `passing.passes` already includes `passing.crosses`.
 - **SCA sums short at team level.** `sca_breakdown.foul_drawn` belongs to the team only, so the players' SCA adds up to less than the team total.
 - **Unrated matches.** `ANALYTICS_UNAVAILABLE` (404) means the match exists but was never rated. That's normal, not an error. None occurred in the sample.
+
+## Heatmaps (`/matches/{id}/heatmaps`), 2d spike (3 EPL 2025/26 matches, all HTTP 200)
+
+- **One request per match covers every player who played** (28/28, 31/31, 26/26 appearances), plus one grid per team. That's the whole cost: +1 request per match.
+- **Shape:**
+
+  ```
+  {
+    "match_id": "m_…",
+    "grid": {"length": 16, "width": 12, "frame": "acting_ltr",
+             "cell_length_m": 6.5625, "cell_width_m": 5.666…},
+    "teams":   [{"team": {"id", "name"}, "side": "home"|"away", "actions", "cells"}],
+    "players": [{"player": {"id", "name", "shirt_number"}, "team": {"id", "name"},
+                 "side", "actions", "cells": [[x, y, n], …]}]
+  }
+  ```
+
+  Cells are sparse `[x, y, actions]` triples (an absent cell = no actions); indices run 0..15 along the pitch and 0..11 across it, on a 105 × 68 m pitch (16 × 6.5625 m, 12 × 5.667 m).
+- **Frames:**
+  - The default, **`acting_ltr`**, puts **every team attacking towards high x**. Keepers' mean depth came out 0.07–0.13 and strikers' 0.52–0.76 for both teams, so no flipping is needed. We use only this frame; the parser rejects any other.
+  - `frame=home_ltr` flips the away team (the away keeper at 0.91–0.93).
+- **⚠️ Lateral axis: low y = the team's RIGHT** (Reece James 0.29, Cucurella 0.76, Salah 0.22, Gakpo 0.79). That's the opposite of lineup `pitch_y`, where high = right. Matters for Phase 8 visuals.
+- **"actions" ≈ 1.1–1.2 × `/players` touches** (medians 1.17, 1.11, 1.16; range 0.50–1.52 per player): on-ball events, including some `/players` doesn't count as touches.
+- **Depth (D-017):** per appearance, the actions-weighted mean of the cell centres along the pitch, divided by the grid length: 0 = own goal line, 1 = opponent's. Stored as `appearance.depth` with `depth_actions`. A player with no actions has no depth.
+- **Single-match midfield depths** (relative to the team's outfield mean; negative = deeper): Caicedo −0.059 / Enzo +0.016; Adams −0.082 / Scott +0.051; Hughes −0.053 / Wharton +0.035; Mac Allister −0.002 / Szoboszlai +0.006; Onana −0.024 / Kamara −0.012; Tonali (single pivot) −0.004, Joelinton +0.008, Bruno +0.058. Gaps are small in one match; the 6/8 label needs a season average.
+- **Not yet known:** coverage in other leagues and older seasons, and what a missing heatmap returns (404 code). The sync treats any non-OK response as `missing` and re-checks it weekly, like missing analytics.
+
+## Pass networks (`/matches/{id}/advanced/network`), 2d spike
+
+- **Shape:** `{match_id, networks: [{team: {id, name}, window: {kind: "first_substitution", until_seconds}, centralization, nodes: [{player: {id, name, shirt_number}, avg_x, avg_y, passes, passes_received, degree, strength, betweenness, clustering}], edges: [{from: {…}, to: {…}, passes}]}]}`.
+- **Starters only, up to the first substitution** (11 nodes per team). `avg_x`/`avg_y` are metres; `avg_x` correlates r = 0.94–0.97 with heatmap depth. A valid fallback for average position, but heatmaps cover every minute and every player. Phase 8 material.
 
 ## Positions (lineups decoded by the spike)
 
@@ -167,7 +204,7 @@ Keys aren't consistently named: `ShotsOnTarget`, `ShotsOffTarget` and `Offsides`
 - **Starter `position_id` is a grid code: `row * 10 + column`.**
   - **Row** is the line, counted from the goal: 1 = GK, 3 = defensive line, 5 = wing-back line, 6 = holding midfield, 7 = central midfield, 8 = attacking midfield, 10 = forward line, 11 = lone striker.
   - **Column** runs 1–9 across the pitch; 5 is central. **✅ Low columns are the RIGHT flank, high columns the LEFT.** Checked against known players: Frimpong (RB) = 32, Kerkez (LB) = 38, Calafiori (LB) = 38 twice, Salah (RW) = 83, Saka (RW) = 103, Rice (left CM in a 4-3-3) = 77.
-  - **`pitch_x`** (depth) and **`pitch_y`** (width) are fixed by the slot, not measured; high `pitch_y` = right. The same slot gives identical coordinates in every match: GK always `(0.1, 0.5)`; slot 32 always `y = 0.88`, 38 always `y = 0.13`. They add nothing beyond `formation` + `position_id`.
+  - **`pitch_x`** (depth) and **`pitch_y`** (width) are fixed by the slot, not measured; high `pitch_y` = right. The same slot gives identical coordinates in every match: GK always `(0.1, 0.5)`; slot 32 always `y = 0.88`, 38 always `y = 0.13`. They add nothing beyond `formation` + `position_id`, so they **can't** separate the two players of a double pivot (why 2d uses heatmaps).
 - **Slots seen across the 9 formations in the sample:**
 
   | Formation | Slots |
@@ -188,16 +225,17 @@ Keys aren't consistently named: `ShotsOnTarget`, `ShotsOffTarget` and `Offsides`
   2. Starters get that role. Subs get only their broad category.
   3. A player's season position is their most-played role, weighted by minutes.
   4. The profile `position_id` is a fallback, and a "listed position" for display only.
+- **Who starts in the disputed slots (2c, EPL 2025/26):** 4-2-3-1's 64/66: 864 starts, double-pivot midfielders mixing 6s and 8s (Berge, Garner, Anderson, Gravenberch, Scott, Caicedo, Gueye, Mac Allister, Rice…). 3-4-2-1's 84/86: 186 starts, mostly wingers playing as inside forwards (Sarr, Pino, Mbeumo, Johnson, Cunha…), so mapped W since D-016. Slot 95: 10 starts.
 - **Player profiles (`/players/{id}`, spike, 28 players):**
   - Fields: `id`, `name`, `short_name` ("F. Wirtz", useful for search), `shirt_number` (**a string**, e.g. `"7"`, unlike the integers elsewhere), `position_id`, `country_code`, `image_url`.
   - **`position_id` uses the same grid codes as lineups**, as the player's listed primary slot, and usually agrees on role: Wirtz 85, Alisson 11, Kerkez 38, Frimpong 32, van Dijk 36, Konaté 34, Mateta 105.
   - **But it's unreliable:** some players get only a broad category (Alex Scott `2`, Senesi `1`, Diakité `1`); the side can be wrong (Gakpo is listed at 83, right, but started at 87, left); and strikers move between 104/105/115.
   - So lineups (weighted by minutes) are the source of a player's role. The profile is a fallback for players with no starts, and a label.
-- **Limitation:** lineups give the *starting* shape only. Tactical switches and positional changes during a match aren't visible.
+- **Limitation:** lineups give the *starting* shape only. Tactical switches and positional changes during a match aren't visible (heatmaps cover where a player actually was).
 
 ## EPL 2025/26 full-season crawl (2026-11-20)
 
-- **Load:** 1 match list + 380 × 3 match responses + 537 profiles = **1,679 responses**. At 1 request/s the run completed with no failures. Every match had players, advanced analytics and lineups; none returned `ANALYTICS_UNAVAILABLE`.
+- **Load:** 1 match list + 380 × 3 match responses + 537 profiles = **1,679 responses**. At 1 request/s the run completed with no failures. Every match had players, advanced analytics and lineups; none returned `ANALYTICS_UNAVAILABLE`. (Heatmaps add 380 more, fetched separately after slice 2d-1.)
 - **Profiles:** 537 players, **0 not found**.
 - **`/players` rows:** 15,193 across 380 matches (about 40 per match including unused subs).
 - **Formations:** 19 distinct, by team-matches: 4-2-3-1 432, 3-4-2-1 93, 4-3-3 85, 4-1-4-1 31, 3-5-2 19, 3-4-3 18, 4-4-2 16, 5-4-1 15, 5-3-2 13, 4-4-1-1 8, 3-4-1-2 6, 4-1-3-2 6, 4-1-2-3 4, 4-3-2-1 4, 4-5-1 4, 4-3-1-2 2, 4-2-2-2 2, 5-3-1-1 1, 3-5-1-1 1. New slots seen: 71/79 and 73/75/77 in row 7 for five-man midfields, 63/65/67 for a flat three in row 6, and **95** (row 9) for a player just behind a lone striker. All mapped in SCHEMA.md §7 (D-013).
@@ -219,7 +257,7 @@ Keys aren't consistently named: `ShotsOnTarget`, `ShotsOffTarget` and `Offsides`
 |---|---|---|
 | 400 | `INVALID_PARAMETER` | Bug on our side: fail loudly |
 | 401 | `UNAUTHORIZED` | Bad or missing key: abort the sync |
-| 404 | `RESOURCE_NOT_FOUND` | The ID doesn't exist. Log it. For per-player advanced data, it means the player took no part in the match |
+| 404 | `RESOURCE_NOT_FOUND` | The ID doesn't exist. Log it. For per-player advanced data, it means the player took no part in the match. For heatmaps: the match's heatmaps are `missing` (re-checked weekly) |
 | 404 | `ANALYTICS_UNAVAILABLE` | Negative-cache it with a re-check date; mark the match "not rated" |
 | 404 | `HALVES_UNAVAILABLE` | Not used |
 | 429 | `RATE_LIMIT_EXCEEDED` | Wait for `Retry-After`, then retry |
@@ -239,10 +277,8 @@ The SDK also maps `SUBSCRIPTION_SUSPENDED` and `PLAN_UPGRADE_REQUIRED`, which ar
 - **Team stats are display strings.** `/matches/{id}/stats` returns values like `"12 (55%)"`, to be parsed according to `format_type`. Use `/advanced` when you need typed numbers.
 - **Pitch coordinates:**
   - Shots are in metres on a 105 × 68 pitch, normalized so the attack always goes towards x = 105.
+  - Heatmaps: 16 × 12 cells on 105 × 68 m; in `acting_ltr` every team attacks towards high x; low y = the team's right (see Heatmaps).
   - Lineup coordinates run 0–1 and are fixed per formation slot (see Positions).
-- **Heatmaps:**
-  - A 16 × 12 grid of sparse `[cell_x, cell_y, actions]` triples; an absent cell means no actions there.
-  - The default frame (`acting_ltr`) shows each team attacking in its own direction. Use `frame=home_ltr` to put both teams on one pitch.
 - **IDs changed in Sept 2026 for the 26 rebuilt leagues.** Matters only if we ever cache those leagues from before that date.
 
 ## Status of the spike's questions
@@ -262,6 +298,10 @@ The SDK also maps `SUBSCRIPTION_SUSPENDED` and `PLAN_UPGRADE_REQUIRED`, which ar
 - [x] Profile `position_id`: same grid codes, but unreliable, so fallback only
 - [x] Every formation in EPL 2025/26 (19), all mapped (crawl)
 - [x] The five penalty/own-goal keys: sent only when ≥ 1, so missing = 0 (crawl)
-- [ ] Whether `was_fouled` null means 0 (compare team sums with the opponents' `fouls`; low priority)
+- [x] `was_fouled` null means 0 (2c, D-016)
+- [x] `launch_pct` and `claim_rate` equal their counts' ratios × 100, rounded to 0.1 (2c)
+- [x] `/players` `expected_assists` is real xA (2c, check 5)
+- [x] Heatmap shape, frames and cost: per player, one request per match, `acting_ltr` (2d spike)
+- [ ] Heatmap coverage outside EPL 2025/26, and the error code for a missing heatmap
 - [ ] Whether advanced analytics ever appear later for a match that returned `ANALYTICS_UNAVAILABLE` (needs weeks of observation)
 - [ ] **Terms of use and data license.** The docs don't include them. Ask PitchAPI support before hosting (D-007)

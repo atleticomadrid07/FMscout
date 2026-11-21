@@ -1,7 +1,7 @@
 """Formation + slot → role (SCHEMA.md §7, D-011). Source of truth for `formation_role`.
 
 PitchAPI's starter `position_id` is a grid code: row * 10 + column. The slot alone doesn't
-decide the role (84/86 are 10s in a 3-4-2-1 but central midfielders in a 4-1-4-1), so the
+decide the role (84/86 are 10s in a 4-3-2-1 but central midfielders in a 4-1-4-1), so the
 mapping is written out per formation and reviewed by hand. Formations not listed here get
 role = NULL and are reported by the sync; nothing is guessed.
 
@@ -77,11 +77,13 @@ FORMATION_ROLES: Final[dict[str, dict[int, Role]]] = {
         84: "CM", 86: "CM",
         103: "W", 105: "ST", 107: "W",
     },
+    # 84/86 are W, not AM (2c, D-016): in EPL 2025/26 most starters there are wingers by
+    # trade playing as inside forwards (Sarr, Pino, Mbeumo, Johnson, Cunha).
     "3-4-2-1": {
         11: "GK",
         33: "CB", 35: "CB", 37: "CB",
         62: "WB", 64: "CM", 66: "CM", 68: "WB",
-        84: "AM", 86: "AM",
+        84: "W", 86: "W",
         105: "ST",
     },
     "3-4-3": {
@@ -99,7 +101,8 @@ FORMATION_ROLES: Final[dict[str, dict[int, Role]]] = {
     },
     # Added after the EPL 2025/26 crawl (`report formations`), with the user's calls:
     # slot 95 (behind a lone striker) is AM; 4-1-3-2's 83/87 are CM (a narrow diamond);
-    # 4-3-2-1's 84/86 are AM (as in 3-4-2-1); 5-4-1's wide midfielders are W (D-011).
+    # 4-3-2-1's 84/86 are AM (kept when 3-4-2-1's became W, D-016); 5-4-1's wide
+    # midfielders are W (D-011).
     "3-5-2": {
         11: "GK",
         33: "CB", 35: "CB", 37: "CB",
@@ -212,7 +215,7 @@ def listed_slot_roles(slot_code: int | None) -> tuple[Role | None, PeerRole | No
 
     Formation-free: a slot counts only as far as every mapped formation agrees on it. 64/66
     is DM in a 4-2-3-1 but CM in a 3-4-2-1, so the role is unknown but the peer role is CM.
-    84/86 is AM in some formations and CM in others, so both are unknown. Broad categories
+    84/86 is W, AM or CM depending on the formation, so both are unknown. Broad categories
     (0-3) and unmapped slots give nothing.
     """
     if slot_code is None:

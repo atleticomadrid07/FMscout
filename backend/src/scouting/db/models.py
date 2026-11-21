@@ -28,6 +28,7 @@ PLAYER_ORIGINS: Final = ("real", "fm")
 FETCH_STATUSES: Final = ("pending", "ok", "missing")
 ADVANCED_STATUSES: Final = ("pending", "ok", "unavailable")
 SCOPE_KINDS: Final = ("season", "fm_import")
+PERCENTILE_BASES: Final = ("per90", "rate")
 ROLE_SOURCES: Final = ("starts", "listed")
 
 
@@ -134,6 +135,12 @@ class Match(Base):
     lineups_status: Mapped[str] = mapped_column(
         String(16), default="pending", server_default="pending"
     )
+    # Slice 2d: 'pending' (not fetched yet, e.g. an offline run), 'ok' or 'missing'. No CHECK:
+    # SQLite can't add one to an existing table without rebuilding it, and `appearance`
+    # references `match` (ERRORS.md); the values are FETCH_STATUSES, set only by the sync.
+    heatmaps_status: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending"
+    )
     normalized_at: Mapped[datetime | None]  # naive UTC; set when per-match data is normalized
 
 
@@ -222,6 +229,11 @@ class Appearance(Base):
     minutes: Mapped[int]  # canonical: /players minutes_played, full match = 90 (D-010)
     minutes_actual: Mapped[int | None]  # advanced minutes incl. stoppage; reference only
     rating: Mapped[float | None]  # rating_title; NULL = not rated (short cameo, or no ratings)
+    # Slice 2d: where on the pitch the player's actions were, from the match heatmap.
+    # depth = actions-weighted mean along the pitch, 0 = own goal line, 1 = opponent's;
+    # depth_actions = how many actions it rests on. NULL: no heatmap, or no actions.
+    depth: Mapped[float | None]
+    depth_actions: Mapped[int | None]
 
 
 # --- metric registry and values -------------------------------------------------------------
@@ -257,6 +269,11 @@ class Metric(Base):
     is_model_output: Mapped[bool]
     higher_is_better: Mapped[bool]
     description: Mapped[str] = mapped_column(String(500))
+    # Percentile eligibility and colouring (slice 2b, D-014). No CHECK on `direction`: SQLite
+    # can't add one to an existing table without rebuilding it; the registry is validated by
+    # tests instead. Plain string default, per the D-013 migration rule.
+    min_attempts: Mapped[int | None]  # fractions: fewest season attempts for a percentile
+    direction: Mapped[str] = mapped_column(String(8), server_default="higher")
 
 
 class StatValue(Base):
@@ -411,3 +428,50 @@ class PlayerScopeStat(Base):
     matches_with_value: Mapped[int]
     per90: Mapped[float | None]  # counts, model outputs, distances; NULL when minutes = 0
     rate: Mapped[float | None]  # fractions: total / denominator; NULL when denominator = 0
+
+
+# --- peer groups and percentiles (slice 2b; D-014) --------------------------------------------
+
+
+class PeerGroup(Base):
+    """Players of one peer role in one scope with at least `min_minutes`. Upserted on rebuild
+    (not deleted), so its ID stays stable and `report checksum` doesn't change."""
+
+    __tablename__ = "peer_group"
+    __table_args__ = (
+        CheckConstraint(_in("peer_role", PEER_ROLES), name="peer_role"),
+        UniqueConstraint("scope_id", "peer_role", "min_minutes"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scope_id: Mapped[int] = mapped_column(ForeignKey("scope.id", ondelete="CASCADE"))
+    peer_role: Mapped[str] = mapped_column(String(4))
+    min_minutes: Mapped[int]
+    size: Mapped[int]  # players in the group; a metric can rank fewer (see ranked_among)
+    computed_at: Mapped[datetime]
+
+
+class Percentile(Base):
+    """One player's rank on one metric within a peer group. Stored raw: a low value is a low
+    percentile even for lower-is-better metrics (the UI flips those). A player who isn't
+    eligible for a metric (too few minutes on it, too few attempts) has no row."""
+
+    __tablename__ = "percentile"
+    __table_args__ = (
+        CheckConstraint(_in("basis", PERCENTILE_BASES), name="basis"),
+        CheckConstraint("pct >= 0 AND pct <= 100", name="pct"),
+        Index(None, "player_id"),
+        {"sqlite_with_rowid": False},
+    )
+
+    peer_group_id: Mapped[int] = mapped_column(
+        ForeignKey("peer_group.id", ondelete="CASCADE"), primary_key=True
+    )
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    metric_id: Mapped[int] = mapped_column(ForeignKey("metric.id"), primary_key=True)
+    basis: Mapped[str] = mapped_column(String(8))  # per90 or rate
+    value: Mapped[float]  # the per-90 or rate that was ranked
+    pct: Mapped[float]  # midpoint percentile, 0-100
+    ranked_among: Mapped[int]  # eligible players for this metric in the group

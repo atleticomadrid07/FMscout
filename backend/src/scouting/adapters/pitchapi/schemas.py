@@ -11,9 +11,17 @@ match ID belongs) is caught, without assuming anything about the rest of the str
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, Any
+from typing import Annotated, Any, Final, Self
 
-from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, RootModel
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    model_validator,
+)
 
 
 def _prefixed(prefix: str) -> AfterValidator:
@@ -229,6 +237,65 @@ class LineupSide(_Payload):
 class LineupsPayload(_Payload):
     home: LineupSide
     away: LineupSide
+
+
+# --- GET /v1/matches/{id}/heatmaps (slice 2d, D-016) -------------------------------------------
+# Spike-verified 2026-11-21 (3 EPL matches): one response per match with a grid for every
+# player who played and one per team. `teams` isn't used, so it isn't modelled. In the
+# default frame, acting_ltr, every team attacks towards high x (keepers ~0.1, strikers
+# ~0.6-0.75 of the pitch length); depth relies on that, so any other frame is rejected.
+
+HEATMAP_FRAME: Final = "acting_ltr"
+
+
+class HeatmapGrid(_Payload):
+    length: int = Field(gt=0)  # cells along the pitch (16 = 105 m / 6.5625 m)
+    width: int = Field(gt=0)  # cells across it (12)
+    frame: NonEmpty
+
+
+class HeatmapTeamRef(_Payload):
+    id: TeamId
+
+
+class HeatmapPlayerRef(_Payload):
+    id: PlayerId
+    name: str | None = None
+
+
+# [cell_x, cell_y, actions]; an absent cell means no actions there.
+_Count = Annotated[int, Field(ge=0)]
+HeatmapCell = tuple[_Count, _Count, _Count]
+
+
+class HeatmapPlayer(_Payload):
+    player: HeatmapPlayerRef
+    team: HeatmapTeamRef
+    actions: int = Field(ge=0)
+    cells: list[HeatmapCell]
+
+
+class HeatmapsPayload(_Payload):
+    match_id: MatchId
+    grid: HeatmapGrid
+    players: list[HeatmapPlayer]
+
+    @model_validator(mode="after")
+    def _check_frame_and_cells(self) -> Self:
+        if self.grid.frame != HEATMAP_FRAME:
+            raise ValueError(f"expected frame {HEATMAP_FRAME!r}, got {self.grid.frame!r}")
+        seen: set[str] = set()
+        for row in self.players:
+            if row.player.id in seen:
+                raise ValueError(f"player {row.player.id} has two heatmaps")
+            seen.add(row.player.id)
+            for x, y, _ in row.cells:
+                if x >= self.grid.length or y >= self.grid.width:
+                    raise ValueError(
+                        f"player {row.player.id}: cell ({x}, {y}) is outside the "
+                        f"{self.grid.length} x {self.grid.width} grid"
+                    )
+        return self
 
 
 # --- GET /v1/players/{id} -------------------------------------------------------------------

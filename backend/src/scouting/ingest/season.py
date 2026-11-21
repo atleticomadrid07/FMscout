@@ -49,6 +49,8 @@ class SeasonSummary:
     advanced_unavailable: int = 0
     players_missing: int = 0
     lineups_missing: int = 0
+    heatmaps_missing: int = 0
+    heatmaps_pending: int = 0  # offline, never fetched (slice 2d)
     stat_values: int = 0
     failed: list[tuple[str, str]] = field(default_factory=list)  # (match ID, error)
     unmapped_slots: Counter[tuple[str | None, int]] = field(default_factory=Counter)
@@ -62,6 +64,8 @@ class SeasonSummary:
         self.advanced_unavailable += match.advanced_status == "unavailable"
         self.players_missing += match.players_status == "missing"
         self.lineups_missing += match.lineups_status == "missing"
+        self.heatmaps_missing += match.heatmaps_status == "missing"
+        self.heatmaps_pending += match.heatmaps_status == "pending"
         self.stat_values += match.stat_values
         self.unmapped_slots.update(match.unmapped_slots)
         self.unknown_keys |= match.unknown_keys
@@ -89,6 +93,7 @@ def needs_work() -> ColumnElement[bool]:
         Match.players_status != "ok",
         Match.advanced_status != "ok",
         Match.lineups_status != "ok",
+        Match.heatmaps_status != "ok",
     )
 
 

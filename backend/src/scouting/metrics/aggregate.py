@@ -38,6 +38,7 @@ from scouting.db.models import (
     Season,
 )
 from scouting.domain.positions import PEER_ROLE, ROLES, PeerRole, Role, listed_slot_roles
+from scouting.metrics.percentiles import PercentileSummary, build_percentiles
 from scouting.metrics.registry import REGISTRY
 
 MINUTES_PER_MATCH: Final = 90
@@ -57,6 +58,7 @@ class AggregateSummary:
     # Peer-role sizes among players with at least min_minutes; key None = no role.
     peer_roles: Counter[str | None] = field(default_factory=Counter)
     role_sources: Counter[str | None] = field(default_factory=Counter)
+    percentiles: PercentileSummary | None = None
 
 
 def scope_for_season(session: Session, season_id: int) -> Scope:
@@ -142,6 +144,7 @@ def aggregate_season(session: Session, season_id: int) -> AggregateSummary:
     scope = scope_for_season(session, season_id)
     summary = AggregateSummary(season=season.label)
 
+    # Percentile rows reference players; build_percentiles clears and rebuilds them below.
     for table in (PlayerScopeStat, PlayerScopeRole, PlayerScopeTeam, PlayerScope):
         session.execute(delete(table).where(table.scope_id == scope.id))
 
@@ -222,4 +225,5 @@ def aggregate_season(session: Session, season_id: int) -> AggregateSummary:
     assert isinstance(result, CursorResult)  # an INSERT always gives a cursor result
     summary.stat_rows = result.rowcount
     summary.min_minutes = min_minutes
+    summary.percentiles = build_percentiles(session, scope.id, min_minutes, computed_at)
     return summary

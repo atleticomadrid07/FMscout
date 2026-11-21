@@ -139,22 +139,35 @@ def test_no_attempts_gives_a_null_rate(synced_season: Engine) -> None:
 
 
 def test_unknown_null_adds_neither_total_nor_minutes(synced_season: Engine) -> None:
-    # was_fouled is NULL for C's left-back in both matches (season_null = "skip").
+    # A provider null on a "skip" metric (the default), in both of C's left-back's matches.
+    set_value(synced_season, "p_CLB01", "m_FIXT02", "touches", None)
+    set_value(synced_season, "p_CLB01", "m_FIXT03", "touches", None)
     aggregate(synced_season)
-    fouled = stat(synced_season, "p_CLB01", "was_fouled")
-    assert fouled is not None
-    assert (fouled.total, fouled.minutes, fouled.matches_with_value, fouled.per90) == (
+    touches = stat(synced_season, "p_CLB01", "touches")
+    assert touches is not None
+    assert (touches.total, touches.minutes, touches.matches_with_value, touches.per90) == (
         None, 0, 0, None,
     )  # fmt: skip
 
 
 def test_mixed_null_counts_only_the_known_match(synced_season: Engine) -> None:
-    set_value(synced_season, "p_CLB01", "m_FIXT03", "was_fouled", 2)
+    set_value(synced_season, "p_CLB01", "m_FIXT02", "touches", None)
+    set_value(synced_season, "p_CLB01", "m_FIXT03", "touches", 40)
+    aggregate(synced_season)
+    touches = stat(synced_season, "p_CLB01", "touches")
+    assert touches is not None
+    assert (touches.total, touches.minutes, touches.matches_with_value) == (40, 90, 1)
+    assert touches.per90 == pytest.approx(40.0)  # per 90 of the 90 known minutes, not 180
+
+
+def test_was_fouled_null_counts_as_zero(synced_season: Engine) -> None:
+    # C's left-back: was_fouled NULL in both matches. PitchAPI never sends 0 (2c, D-016).
     aggregate(synced_season)
     fouled = stat(synced_season, "p_CLB01", "was_fouled")
     assert fouled is not None
-    assert (fouled.total, fouled.minutes, fouled.matches_with_value) == (2, 90, 1)
-    assert fouled.per90 == pytest.approx(2.0)  # per 90 of the 90 known minutes, not 180
+    assert (fouled.total, fouled.minutes, fouled.matches_with_value, fouled.per90) == (
+        0, 180, 2, 0,
+    )  # fmt: skip
 
 
 def test_xgot_null_counts_as_zero(synced_season: Engine) -> None:
@@ -270,7 +283,7 @@ def test_summary_and_min_minutes(synced_season: Engine) -> None:
     assert summary.players == 14
     assert summary.min_minutes == 45  # 2 matches per team x 90 x 25%
     # The starters (78-180 min) qualify; the subs (5-24 min) don't.
-    assert summary.peer_roles == {"GK": 4, "FB": 2, "AM": 2, "ST": 2}
+    assert summary.peer_roles == {"GK": 4, "FB": 2, "W": 2, "ST": 2}
     assert summary.role_sources == {"starts": 10, "listed": 2, None: 2}
     with Session(synced_season) as session:
         assert default_min_minutes(session, find_season(session, LEAGUE, SEASON).id) == 45

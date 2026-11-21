@@ -81,16 +81,18 @@ def season_responses(load_fixture: LoadFixture) -> SeasonResponses:
     players = load_fixture("match_players.json")
     advanced = load_fixture("match_advanced.json")["players"]
     lineups = load_fixture("match_lineups.json")
+    heatmaps = load_fixture("match_heatmaps.json")  # slice 2d
 
-    def side(template: str, team: str, letter: str) -> tuple[Any, Any, Any]:
+    def side(template: str, team: str, letter: str) -> tuple[Any, Any, Any, Any]:
         source_team, lineup_side = _TEMPLATES[template]
         picked = (
             [r for r in players if r["team_id"] == source_team],
             [r for r in advanced if r["team_id"] == source_team],
             lineups[lineup_side],
+            [r for r in heatmaps["players"] if r["team"]["id"] == source_team],
         )
         text = json.dumps(picked).replace("p_FX", f"p_{letter}").replace(source_team, team)
-        loaded: tuple[Any, Any, Any] = tuple(json.loads(text))
+        loaded: tuple[Any, Any, Any, Any] = tuple(json.loads(text))
         return loaded
 
     responses: SeasonResponses = {
@@ -99,11 +101,17 @@ def season_responses(load_fixture: LoadFixture) -> SeasonResponses:
     }
     names: dict[str, str] = {}
     for match_id, home, away in SEASON_MATCHES:
-        h_rows, h_adv, h_side = side(home[1], home[0], home[2])
-        a_rows, a_adv, a_side = side(away[1], away[0], away[2])
+        h_rows, h_adv, h_side, h_heat = side(home[1], home[0], home[2])
+        a_rows, a_adv, a_side, a_heat = side(away[1], away[0], away[2])
         responses[f"/v1/matches/{match_id}/players"] = h_rows + a_rows
         responses[f"/v1/matches/{match_id}/advanced/players"] = {"players": h_adv + a_adv}
         responses[f"/v1/matches/{match_id}/lineups"] = {"home": h_side, "away": a_side}
+        responses[f"/v1/matches/{match_id}/heatmaps"] = {
+            "match_id": match_id,
+            "grid": heatmaps["grid"],
+            "teams": [],  # not used by the sync
+            "players": h_heat + a_heat,
+        }
         names.update({r["player"]["id"]: r["player"]["name"] for r in h_rows + a_rows})
     for player_id, name in names.items():
         first, _, last = name.partition(" ")

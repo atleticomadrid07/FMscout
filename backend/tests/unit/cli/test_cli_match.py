@@ -3,6 +3,7 @@ against temporary databases seeded with the hand-made fixtures."""
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -99,3 +100,51 @@ def test_inspect_unknown_appearance_explains(seeded: None) -> None:
     result = invoke("inspect", "appearance", "--match", MATCH, "--player", "p_FXUN01")
     assert result.exit_code == 1
     assert "no appearance" in result.output
+
+
+# --- heatmaps and depth (slice 2d) --------------------------------------------------------------
+
+
+def add_heatmaps(load_fixture: Any) -> None:
+    path = build_path("matches", MATCH, "heatmaps")
+    data = load_fixture("match_heatmaps.json")
+    with RawStore(os.environ["RAW_DB_PATH"]) as store:
+        store.put(RawRecord(cache_key(path), path, {}, 200, None, None, data, T0))
+
+
+def sync_all() -> None:
+    invoke("sync", "matches", "--league", "l_FIXT01", "--season", "2025/2026", "--offline")
+    invoke("sync", "match", MATCH, "--offline")
+
+
+def test_heatmaps_not_fetched_yet_are_pending_offline(seeded: None) -> None:
+    invoke("sync", "matches", "--league", "l_FIXT01", "--season", "2025/2026", "--offline")
+    result = invoke("sync", "match", MATCH, "--offline")
+    assert result.exit_code == 0, result.output
+    assert "lineups ok, heatmaps pending" in result.output
+    out = invoke("inspect", "appearance", "--match", MATCH, "--player", "p_FXLB01").output
+    assert "depth not fetched yet (run an online sync)" in out
+
+
+def test_inspect_shows_depth(seeded: None, load_fixture: Any) -> None:
+    add_heatmaps(load_fixture)
+    sync_all()
+    lb = invoke("inspect", "appearance", "--match", MATCH, "--player", "p_FXLB01")
+    assert lb.exit_code == 0, lb.output
+    assert "depth 0.312 (0 = own goal line, 1 = opponent's) from 8 actions" in lb.output
+    keeper = invoke("inspect", "appearance", "--match", MATCH, "--player", "p_FXGK03").output
+    assert "depth none (no actions on the heatmap)" in keeper
+
+
+def test_sync_match_reports_players_without_a_heatmap(seeded: None, load_fixture: Any) -> None:
+    path = build_path("matches", MATCH, "heatmaps")
+    data = load_fixture("match_heatmaps.json")
+    data["players"] = [r for r in data["players"] if r["player"]["id"] != "p_FXSB01"]
+    with RawStore(os.environ["RAW_DB_PATH"]) as store:
+        store.put(RawRecord(cache_key(path), path, {}, 200, None, None, data, T0))
+    invoke("sync", "matches", "--league", "l_FIXT01", "--season", "2025/2026", "--offline")
+    result = invoke("sync", "match", MATCH, "--offline")
+    assert "lineups ok, heatmaps ok" in result.output
+    assert "no heatmap for: Dev Sub" in result.output
+    out = invoke("inspect", "appearance", "--match", MATCH, "--player", "p_FXSB01").output
+    assert "depth none (player not on the heatmap)" in out

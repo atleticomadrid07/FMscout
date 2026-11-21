@@ -1,0 +1,231 @@
+{
+  "_note": "HAND-MADE TEST FIXTURE, not real PitchAPI data. Shaped like the real /v1/matches/{id}/heatmaps `data` payload (slice 2d spike, 2026-11-21): one grid per player who played plus one per team, frame acting_ltr (every team attacks towards high x). Match m_FIXT01; cells chosen so depths are easy to work out by hand (see tests/unit/ingest/test_match_detail.py). The unused sub (p_FXUN01) has no grid; the sub keeper has one with no actions.",
+  "data": {
+    "match_id": "m_FIXT01",
+    "grid": {
+      "length": 16,
+      "width": 12,
+      "frame": "acting_ltr",
+      "cell_length_m": 6.5625,
+      "cell_width_m": 5.666666666666667
+    },
+    "teams": [
+      {
+        "team": {
+          "id": "t_FIXTA1",
+          "name": "Example Athletic"
+        },
+        "side": "home",
+        "actions": 29,
+        "cells": [
+          [
+            1,
+            5,
+            10
+          ],
+          [
+            4,
+            10,
+            6
+          ],
+          [
+            6,
+            10,
+            2
+          ],
+          [
+            8,
+            5,
+            3
+          ],
+          [
+            12,
+            6,
+            4
+          ],
+          [
+            14,
+            6,
+            4
+          ]
+        ]
+      },
+      {
+        "team": {
+          "id": "t_FIXTB2",
+          "name": "Sample Rovers"
+        },
+        "side": "away",
+        "actions": 19,
+        "cells": [
+          [
+            1,
+            6,
+            9
+          ],
+          [
+            10,
+            4,
+            5
+          ],
+          [
+            11,
+            5,
+            5
+          ]
+        ]
+      }
+    ],
+    "players": [
+      {
+        "player": {
+          "id": "p_FXGK01",
+          "name": "Ada Keeper",
+          "shirt_number": 1
+        },
+        "team": {
+          "id": "t_FIXTA1",
+          "name": "Example Athletic"
+        },
+        "side": "home",
+        "actions": 10,
+        "cells": [
+          [
+            1,
+            5,
+            10
+          ]
+        ]
+      },
+      {
+        "player": {
+          "id": "p_FXLB01",
+          "name": "Bea Fullbäck",
+          "shirt_number": 3
+        },
+        "team": {
+          "id": "t_FIXTA1",
+          "name": "Example Athletic"
+        },
+        "side": "home",
+        "actions": 8,
+        "cells": [
+          [
+            4,
+            10,
+            6
+          ],
+          [
+            6,
+            10,
+            2
+          ]
+        ]
+      },
+      {
+        "player": {
+          "id": "p_FXST01",
+          "name": "Cal Striker",
+          "shirt_number": 9
+        },
+        "team": {
+          "id": "t_FIXTA1",
+          "name": "Example Athletic"
+        },
+        "side": "home",
+        "actions": 8,
+        "cells": [
+          [
+            12,
+            6,
+            4
+          ],
+          [
+            14,
+            6,
+            4
+          ]
+        ]
+      },
+      {
+        "player": {
+          "id": "p_FXSB01",
+          "name": "Dev Sub",
+          "shirt_number": 14
+        },
+        "team": {
+          "id": "t_FIXTA1",
+          "name": "Example Athletic"
+        },
+        "side": "home",
+        "actions": 3,
+        "cells": [
+          [
+            8,
+            5,
+            3
+          ]
+        ]
+      },
+      {
+        "player": {
+          "id": "p_FXGK02",
+          "name": "Fay Keeper",
+          "shirt_number": 1
+        },
+        "team": {
+          "id": "t_FIXTB2",
+          "name": "Sample Rovers"
+        },
+        "side": "away",
+        "actions": 9,
+        "cells": [
+          [
+            1,
+            6,
+            9
+          ]
+        ]
+      },
+      {
+        "player": {
+          "id": "p_FXAM01",
+          "name": "Gus Ten",
+          "shirt_number": 10
+        },
+        "team": {
+          "id": "t_FIXTB2",
+          "name": "Sample Rovers"
+        },
+        "side": "away",
+        "actions": 10,
+        "cells": [
+          [
+            10,
+            4,
+            5
+          ],
+          [
+            11,
+            5,
+            5
+          ]
+        ]
+      },
+      {
+        "player": {
+          "id": "p_FXGK03",
+          "name": "Hal Backup",
+          "shirt_number": 13
+        },
+        "team": {
+          "id": "t_FIXTB2",
+          "name": "Sample Rovers"
+        },
+        "side": "away",
+        "actions": 0,
+        "cells": []
+      }
+    ]
+  }
+}

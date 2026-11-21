@@ -14,6 +14,8 @@ from scouting.db.models import (
     Match,
     MatchSourceId,
     Metric,
+    PeerGroup,
+    Percentile,
     Player,
     PlayerScope,
     PlayerScopeRole,
@@ -26,6 +28,7 @@ from scouting.db.models import (
     Team,
 )
 from scouting.domain.names import search_name
+from scouting.domain.positions import PEER_ROLES
 
 SOURCE = "pitchapi"
 
@@ -59,6 +62,9 @@ class AppearanceDetail:
     minutes: int
     minutes_actual: int | None
     rating: float | None
+    depth: float | None  # slice 2d: 0 = own goal line .. 1 = opponent's
+    depth_actions: int | None
+    heatmaps_status: str
     metrics: list[MetricLine]
 
 
@@ -123,6 +129,9 @@ def appearance_detail(
         minutes=appearance.minutes,
         minutes_actual=appearance.minutes_actual,
         rating=appearance.rating,
+        depth=appearance.depth,
+        depth_actions=appearance.depth_actions,
+        heatmaps_status=match.heatmaps_status,
         metrics=metrics,
     )
 
@@ -175,6 +184,17 @@ class SeasonStatLine:
     matches: int
     per90: float | None
     rate: float | None
+    direction: str = "higher"
+    min_attempts: int | None = None
+    pct: float | None = None  # within the player's peer group; None = not ranked
+    ranked_among: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GroupInfo:
+    peer_role: str
+    size: int
+    min_minutes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +214,8 @@ class PlayerSeason:
     teams: list[tuple[str, int, int]]  # (team, minutes, matches)
     roles: list[tuple[str, int, int]]  # (role, minutes as a starter, starts)
     stats: list[SeasonStatLine]
+    group: GroupInfo | None  # the peer group he's ranked in; None = not in one
+    group_min_minutes: int | None  # the scope's threshold, to explain why he isn't
 
 
 def player_season(session: Session, scope_id: int, player_id: int) -> PlayerSeason | None:
@@ -231,6 +253,27 @@ def player_season(session: Session, scope_id: int, player_id: int) -> PlayerSeas
             .order_by(PlayerScopeRole.minutes.desc(), PlayerScopeRole.role)
         )
     ]
+    group_row = (
+        session.scalars(
+            select(PeerGroup).where(
+                PeerGroup.scope_id == scope_id, PeerGroup.peer_role == scope_row.peer_role
+            )
+        ).first()
+        if scope_row.peer_role is not None
+        else None
+    )
+    any_group = session.scalars(select(PeerGroup).where(PeerGroup.scope_id == scope_id)).first()
+    in_group = group_row is not None and scope_row.minutes >= group_row.min_minutes
+    ranks: dict[int, tuple[float, int]] = {}
+    if in_group and group_row is not None:
+        ranks = {
+            metric_id: (pct, n)
+            for metric_id, pct, n in session.execute(
+                select(Percentile.metric_id, Percentile.pct, Percentile.ranked_among).where(
+                    Percentile.peer_group_id == group_row.id, Percentile.player_id == player_id
+                )
+            )
+        }
     stats = [
         SeasonStatLine(
             code=metric.code,
@@ -245,6 +288,10 @@ def player_season(session: Session, scope_id: int, player_id: int) -> PlayerSeas
             matches=stat.matches_with_value,
             per90=stat.per90,
             rate=stat.rate,
+            direction=metric.direction,
+            min_attempts=metric.min_attempts,
+            pct=ranks[metric.id][0] if metric.id in ranks else None,
+            ranked_among=ranks[metric.id][1] if metric.id in ranks else None,
         )
         for stat, metric in session.execute(
             select(PlayerScopeStat, Metric)
@@ -269,6 +316,12 @@ def player_season(session: Session, scope_id: int, player_id: int) -> PlayerSeas
         teams=teams,
         roles=roles,
         stats=stats,
+        group=(
+            GroupInfo(group_row.peer_role, group_row.size, group_row.min_minutes)
+            if in_group and group_row is not None
+            else None
+        ),
+        group_min_minutes=any_group.min_minutes if any_group is not None else None,
     )
 
 
@@ -311,3 +364,138 @@ def metric_by_match(
             .order_by(Match.kickoff_utc, Match.id)
         )
     ]
+
+
+# --- peer reports (slice 2b) --------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class PeerRow:
+    name: str
+    external_id: str
+    team: str
+    minutes: int
+    value: float
+    pct: float
+
+
+@dataclass(frozen=True, slots=True)
+class PeerRanking:
+    group: GroupInfo
+    metric_label: str
+    basis: str
+    direction: str
+    is_model_output: bool
+    ranked_among: int
+    rows: list[PeerRow]  # best value first
+
+
+def _main_teams(session: Session, scope_id: int) -> dict[int, str]:
+    """Each player's team with the most minutes in the scope."""
+    best: dict[int, tuple[int, str]] = {}
+    for player_id, team, minutes in session.execute(
+        select(PlayerScopeTeam.player_id, Team.name, PlayerScopeTeam.minutes)
+        .join(Team, Team.id == PlayerScopeTeam.team_id)
+        .where(PlayerScopeTeam.scope_id == scope_id)
+        .order_by(PlayerScopeTeam.player_id, Team.name)
+    ):
+        if player_id not in best or minutes > best[player_id][0]:
+            best[player_id] = (minutes, team)
+    return {pid: team for pid, (_, team) in best.items()}
+
+
+def peer_ranking(
+    session: Session, scope_id: int, peer_role: str, metric_code: str
+) -> PeerRanking | None:
+    """Everyone ranked on one metric in one peer group, highest value first. None if the
+    scope has no such group."""
+    group = session.scalars(
+        select(PeerGroup).where(PeerGroup.scope_id == scope_id, PeerGroup.peer_role == peer_role)
+    ).first()
+    if group is None:
+        return None
+    metric = session.scalars(select(Metric).where(Metric.code == metric_code)).one()
+    teams = _main_teams(session, scope_id)
+    rows = [
+        PeerRow(name, external_id, teams.get(player_id, "?"), minutes, value, pct)
+        for player_id, name, external_id, minutes, value, pct in session.execute(
+            select(
+                Player.id,
+                Player.name,
+                PlayerSourceId.external_id,
+                PlayerScope.minutes,
+                Percentile.value,
+                Percentile.pct,
+            )
+            .join(Player, Player.id == Percentile.player_id)
+            .join(PlayerSourceId, PlayerSourceId.player_id == Player.id)
+            .join(
+                PlayerScope,
+                (PlayerScope.player_id == Player.id) & (PlayerScope.scope_id == scope_id),
+            )
+            .where(
+                Percentile.peer_group_id == group.id,
+                Percentile.metric_id == metric.id,
+                PlayerSourceId.source == SOURCE,
+            )
+            .order_by(Percentile.value.desc(), Player.name)
+        )
+    ]
+    return PeerRanking(
+        group=GroupInfo(group.peer_role, group.size, group.min_minutes),
+        metric_label=metric.label,
+        basis="rate" if metric.aggregation == "rate_from_sums" else "per90",
+        direction=metric.direction,
+        is_model_output=metric.is_model_output,
+        ranked_among=len(rows),
+        rows=rows,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ThresholdRow:
+    code: str
+    min_attempts: int
+    # peer role -> (ranked, members with data for the metric)
+    counts: dict[str, tuple[int, int]]
+
+
+def threshold_report(session: Session, scope_id: int) -> tuple[list[GroupInfo], list[ThresholdRow]]:
+    """For every metric with a minimum number of attempts: per peer group, how many players
+    have data for it and how many of those are ranked (met the minimum)."""
+    groups = sorted(
+        session.scalars(select(PeerGroup).where(PeerGroup.scope_id == scope_id)),
+        key=lambda g: PEER_ROLES.index(g.peer_role),
+    )
+    infos = [GroupInfo(g.peer_role, g.size, g.min_minutes) for g in groups]
+    report: list[ThresholdRow] = []
+    for metric in session.scalars(
+        select(Metric).where(Metric.min_attempts.is_not(None)).order_by(Metric.id)
+    ):
+        assert metric.min_attempts is not None  # filtered above; narrows the type
+        counts: dict[str, tuple[int, int]] = {}
+        for group in groups:
+            with_data = session.scalar(
+                select(func.count())
+                .select_from(PlayerScopeStat)
+                .join(
+                    PlayerScope,
+                    (PlayerScope.player_id == PlayerScopeStat.player_id)
+                    & (PlayerScope.scope_id == PlayerScopeStat.scope_id),
+                )
+                .where(
+                    PlayerScopeStat.scope_id == scope_id,
+                    PlayerScopeStat.metric_id == metric.id,
+                    PlayerScopeStat.rate.is_not(None),
+                    PlayerScope.peer_role == group.peer_role,
+                    PlayerScope.minutes >= group.min_minutes,
+                )
+            )
+            ranked = session.scalar(
+                select(func.count())
+                .select_from(Percentile)
+                .where(Percentile.peer_group_id == group.id, Percentile.metric_id == metric.id)
+            )
+            counts[group.peer_role] = (ranked or 0, with_data or 0)
+        report.append(ThresholdRow(metric.code, metric.min_attempts, counts))
+    return infos, report

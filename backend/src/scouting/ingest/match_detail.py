@@ -1,9 +1,11 @@
-"""Sync one match's per-player data into scouting.db (slice 1c).
+"""Sync one match's per-player data into scouting.db (slice 1c; heatmaps since 2d).
 
-Three endpoints, joined by PitchAPI player ID:
+Four endpoints, joined by PitchAPI player ID:
 - /players          who played (minutes_played present), team, minutes, rating, basic stats
 - /lineups          starter or sub, slot code, formation → role and side
 - /advanced/players minutes_actual and advanced stats (may be ANALYTICS_UNAVAILABLE)
+- /heatmaps         each player's depth on the pitch (for the 6/8 split, D-016); an offline
+                    run that never fetched it leaves the match's heatmaps 'pending'
 
 Each match is normalized in the caller's transaction: appearances are upserted (and
 removed if they disappeared), and the match's stat rows are deleted and re-inserted.
@@ -14,6 +16,7 @@ Registry absence policies decide what a missing key becomes (0, NULL, or 0 of 0)
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,12 +24,14 @@ from pydantic import ValidationError
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from scouting.adapters.pitchapi.cache import FINISHED_MATCH, CachedFetcher
+from scouting.adapters.pitchapi.cache import FINISHED_MATCH, CachedFetcher, CacheMissError
 from scouting.adapters.pitchapi.client import build_path
 from scouting.adapters.pitchapi.raw_store import RawRecord
 from scouting.adapters.pitchapi.schemas import (
     AdvancedPayload,
     AdvancedRow,
+    HeatmapCell,
+    HeatmapsPayload,
     LineupEntry,
     LineupsPayload,
     PlayersPayload,
@@ -63,6 +68,7 @@ class MatchDetailSummary:
     players_status: str
     advanced_status: str
     lineups_status: str
+    heatmaps_status: str = "pending"
     appearances: UpsertCounts = field(default_factory=UpsertCounts)
     appearances_removed: int = 0
     stat_values: int = 0
@@ -71,6 +77,7 @@ class MatchDetailSummary:
     unmapped_slots: list[tuple[str | None, int]] = field(default_factory=list)
     unknown_keys: set[str] = field(default_factory=set)
     missing_advanced_rows: list[str] = field(default_factory=list)
+    missing_heatmap_rows: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +156,18 @@ def advanced_metric_value(
     return (_number(raw, where=here) if found else 0.0), denominator
 
 
+def heatmap_depth(cells: Sequence[HeatmapCell], grid_length: int) -> tuple[float | None, int]:
+    """(depth, actions) from one player's heatmap in the acting_ltr frame.
+
+    depth = actions-weighted mean of the cell centres along the pitch, scaled so 0 is the
+    player's own goal line and 1 the opponent's. With no actions it's undefined (None).
+    """
+    actions = sum(n for _, _, n in cells)
+    if actions == 0:
+        return None, 0
+    return sum((x + 0.5) * n for x, _, n in cells) / actions / grid_length, actions
+
+
 def _is_goalkeeper(lineup: _LineupInfo | None, flat: dict[str, StatValue]) -> bool:
     """Starter in slot 11, or sub with category 0; without lineup data, keeper-only stats."""
     if lineup is not None:
@@ -157,7 +176,7 @@ def _is_goalkeeper(lineup: _LineupInfo | None, flat: dict[str, StatValue]) -> bo
     return any(key in flat for key in KEEPER_ONLY_KEYS)
 
 
-def _parse[T: (PlayersPayload, AdvancedPayload, LineupsPayload)](
+def _parse[T: (PlayersPayload, AdvancedPayload, LineupsPayload, HeatmapsPayload)](
     model: type[T], record: RawRecord
 ) -> T | None:
     if not record.ok:
@@ -232,18 +251,39 @@ def normalize_match(
     players: RawRecord,
     advanced: RawRecord,
     lineups: RawRecord,
+    heatmaps: RawRecord | None = None,
 ) -> MatchDetailSummary:
+    """`heatmaps` is None when it was never fetched (an offline run): the match's heatmaps
+    stay 'pending' and every depth NULL until an online sync fetches them."""
     metric_ids = sync_reference_data(session)
 
     player_rows = _parse(PlayersPayload, players)
     advanced_payload = _parse(AdvancedPayload, advanced)
     lineups_payload = _parse(LineupsPayload, lineups)
+    heatmaps_payload = None if heatmaps is None else _parse(HeatmapsPayload, heatmaps)
+    if (
+        heatmaps is not None
+        and heatmaps_payload is not None
+        and f"/matches/{heatmaps_payload.match_id}/" not in heatmaps.path
+    ):
+        raise SyncError(f"{heatmaps.path}: heatmaps are for {heatmaps_payload.match_id}")
 
     summary = MatchDetailSummary(
         label=_match_label(session, match),
         players_status="ok" if player_rows is not None else "missing",
         advanced_status="ok" if advanced_payload is not None else "unavailable",
         lineups_status="ok" if lineups_payload is not None else "missing",
+        heatmaps_status=(
+            "pending" if heatmaps is None else "ok" if heatmaps_payload is not None else "missing"
+        ),
+    )
+    depths = (
+        {
+            row.player.id: heatmap_depth(row.cells, heatmaps_payload.grid.length)
+            for row in heatmaps_payload.players
+        }
+        if heatmaps_payload is not None
+        else {}
     )
     advanced_rows = (
         {row.player.id: row for row in advanced_payload.players} if advanced_payload else {}
@@ -299,6 +339,9 @@ def normalize_match(
         advanced_row = advanced_rows.get(row.player.id)
         if advanced_payload is not None and advanced_row is None:
             summary.missing_advanced_rows.append(row.player.name)
+        depth, depth_actions = depths.get(row.player.id, (None, None))
+        if heatmaps_payload is not None and row.player.id not in depths:
+            summary.missing_heatmap_rows.append(row.player.name)
         rating_stat = flat.get("rating_title")
 
         values: dict[str, object] = {
@@ -313,6 +356,8 @@ def normalize_match(
             "minutes": int(minutes),
             "minutes_actual": None if advanced_row is None else advanced_row.minutes_played,
             "rating": None if rating_stat is None else _number(rating_stat.value, where=where),
+            "depth": depth,
+            "depth_actions": depth_actions,
         }
         appearance = existing.pop(player.id, None)
         if appearance is None:
@@ -364,8 +409,10 @@ def normalize_match(
     match.players_status = summary.players_status
     match.advanced_status = summary.advanced_status
     match.lineups_status = summary.lineups_status
-    # The newest fetch time of the three responses, so a re-run from cache is identical.
-    match.normalized_at = to_utc_naive(max(r.fetched_at for r in (players, advanced, lineups)))
+    match.heatmaps_status = summary.heatmaps_status
+    # The newest fetch time of the responses used, so a re-run from cache is identical.
+    used = [r for r in (players, advanced, lineups, heatmaps) if r is not None]
+    match.normalized_at = to_utc_naive(max(r.fetched_at for r in used))
     session.flush()
 
     # DEBUG, not WARNING: a season sync would repeat these for every match. Both CLI
@@ -404,6 +451,17 @@ def sync_match(
     players = fetcher.get(build_path(*base, "players"), policy=FINISHED_MATCH)
     advanced = fetcher.get(build_path(*base, "advanced", "players"), policy=FINISHED_MATCH)
     lineups = fetcher.get(build_path(*base, "lineups"), policy=FINISHED_MATCH)
+    try:
+        heatmaps: RawRecord | None = fetcher.get(
+            build_path(*base, "heatmaps"), policy=FINISHED_MATCH
+        ).record
+    except CacheMissError:
+        heatmaps = None  # offline, never fetched: 'pending' until an online sync (slice 2d)
     return normalize_match(
-        session, match, players=players.record, advanced=advanced.record, lineups=lineups.record
+        session,
+        match,
+        players=players.record,
+        advanced=advanced.record,
+        lineups=lineups.record,
+        heatmaps=heatmaps,
     )

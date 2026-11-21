@@ -71,7 +71,8 @@ def test_known_players(player: str, formation: str, slot: int, expected: tuple[s
 
 
 def test_same_slot_differs_by_formation() -> None:
-    assert role_for("3-4-2-1", 84) == ("AM", "R")  # a 10
+    assert role_for("3-4-2-1", 84) == ("W", "R")  # an inside forward (D-016)
+    assert role_for("4-3-2-1", 84) == ("AM", "R")  # a 10
     assert role_for("4-1-4-1", 84) == ("CM", "R")  # an 8 in front of a single pivot
 
 
@@ -100,7 +101,9 @@ def test_formation_role_rows_cover_every_slot() -> None:
         ("5-3-1-1", 95, ("AM", "C")),
         ("4-1-3-2", 83, ("CM", "R")),  # b: narrow diamond → CM
         ("4-1-3-2", 87, ("CM", "L")),
-        ("4-3-2-1", 84, ("AM", "R")),  # c: as in 3-4-2-1
+        ("4-3-2-1", 84, ("AM", "R")),  # c: 10s (kept when 3-4-2-1's became W, D-016)
+        ("3-4-2-1", 84, ("W", "R")),  # 2c: inside forwards, mostly wingers by trade (D-016)
+        ("3-4-2-1", 86, ("W", "L")),
         ("5-4-1", 72, ("W", "R")),  # d: wide midfielders go with wingers (D-011)
         ("5-4-1", 51, ("WB", "R")),
     ],
@@ -128,7 +131,7 @@ def test_every_formation_has_one_keeper_and_ten_outfield_slots() -> None:
         (85, ("AM", "AM")),
         (95, ("AM", "AM")),
         (115, ("ST", "ST")),
-        (84, (None, None)),  # AM in 3-4-2-1 but CM in 4-1-4-1: undecided
+        (84, (None, None)),  # W in 3-4-2-1, AM in 4-3-2-1, CM in 4-1-4-1: undecided
         (83, (None, None)),  # W in 4-2-3-1 but CM in 4-1-3-2
         (72, (None, None)),  # W in 4-4-2 but WB in 3-4-3
         (2, (None, None)),  # a broad category, not a slot

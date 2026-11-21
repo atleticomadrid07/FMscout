@@ -90,3 +90,21 @@ def test_chances_created_is_never_double_counted() -> None:
     assert "passing.key_passes" in keys
     assert "creation.chances_created" not in keys
     assert "Never add it to key_passes" in BY_CODE["chances_created"].description
+
+
+def test_every_fraction_has_a_minimum_and_nothing_else_does() -> None:
+    from scouting.metrics.registry import MIN_ATTEMPTS, NO_DIRECTION
+
+    fractions = {m.code for m in REGISTRY if m.is_fraction}
+    assert set(MIN_ATTEMPTS) == fractions
+    assert all(MIN_ATTEMPTS[code] > 0 for code in fractions)
+    assert {m.code for m in REGISTRY} >= NO_DIRECTION
+
+
+def test_direction_follows_higher_is_better_unless_a_style_metric() -> None:
+    by_code = {m.code: m for m in REGISTRY}
+    assert by_code["npxg"].direction == "higher"
+    assert by_code["dispossessed"].direction == "lower"
+    assert {m.code for m in REGISTRY if m.direction == "none"} == {
+        "launch_pct", "avg_pass_length", "corners",
+    }  # fmt: skip
