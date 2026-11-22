@@ -895,6 +895,23 @@ def _print_aggregate(summary: AggregateSummary) -> None:
             )
 
 
+@app.command("serve")
+def serve(
+    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8000,
+    reload: Annotated[
+        bool, typer.Option(help="Restart when the code changes (development).")
+    ] = False,
+) -> None:
+    """Run the read-only HTTP API on http://127.0.0.1:PORT (docs at /docs). Local only:
+    it binds to 127.0.0.1 and never calls PitchAPI."""
+    import uvicorn  # only this command needs it
+
+    typer.echo(f"API on http://127.0.0.1:{port}/api/v1 · docs on http://127.0.0.1:{port}/docs")
+    uvicorn.run(
+        "scouting.api.app:create_app", factory=True, host="127.0.0.1", port=port, reload=reload
+    )
+
+
 @app.command("aggregate")
 def aggregate_command(
     league: Annotated[str, typer.Option(help="PitchAPI league ID, e.g. l_4WFCIZ.")],

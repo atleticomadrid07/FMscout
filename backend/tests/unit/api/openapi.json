@@ -1,0 +1,2293 @@
+{
+  "components": {
+    "schemas": {
+      "CoverageOut": {
+        "description": "What the season's matches have, so gaps show as gaps (not blanks or zeros).",
+        "properties": {
+          "advanced_unavailable": {
+            "title": "Advanced Unavailable",
+            "type": "integer"
+          },
+          "heatmaps_missing": {
+            "title": "Heatmaps Missing",
+            "type": "integer"
+          },
+          "lineups_missing": {
+            "title": "Lineups Missing",
+            "type": "integer"
+          },
+          "matches": {
+            "title": "Matches",
+            "type": "integer"
+          },
+          "matches_with_ratings": {
+            "title": "Matches With Ratings",
+            "type": "integer"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "players_missing": {
+            "title": "Players Missing",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "matches",
+          "players_missing",
+          "advanced_unavailable",
+          "lineups_missing",
+          "heatmaps_missing",
+          "pending",
+          "matches_with_ratings"
+        ],
+        "title": "CoverageOut",
+        "type": "object"
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "GroupOut": {
+        "description": "The peer group a player's percentiles come from.",
+        "properties": {
+          "min_minutes": {
+            "title": "Min Minutes",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          },
+          "stored": {
+            "title": "Stored",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "role",
+          "size",
+          "min_minutes",
+          "small_sample",
+          "stored"
+        ],
+        "title": "GroupOut",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Health": {
+        "properties": {
+          "api_version": {
+            "title": "Api Version",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "schema_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Revision"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "schema_out_of_date"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "api_version",
+          "schema_revision",
+          "message"
+        ],
+        "title": "Health",
+        "type": "object"
+      },
+      "MatchValueOut": {
+        "properties": {
+          "attempts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempts"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "goals_against": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goals Against"
+          },
+          "goals_for": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goals For"
+          },
+          "match_id": {
+            "title": "Match Id",
+            "type": "string"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "opponent": {
+            "title": "Opponent",
+            "type": "string"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          },
+          "started": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started"
+          },
+          "team": {
+            "title": "Team",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "venue": {
+            "enum": [
+              "home",
+              "away"
+            ],
+            "title": "Venue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "match_id",
+          "date",
+          "team",
+          "opponent",
+          "venue",
+          "goals_for",
+          "goals_against",
+          "minutes",
+          "started",
+          "value",
+          "attempts",
+          "rate"
+        ],
+        "title": "MatchValueOut",
+        "type": "object"
+      },
+      "MetricOut": {
+        "properties": {
+          "applies_to": {
+            "enum": [
+              "all",
+              "outfield",
+              "gk"
+            ],
+            "title": "Applies To",
+            "type": "string"
+          },
+          "basis": {
+            "enum": [
+              "per90",
+              "rate"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "higher",
+              "lower",
+              "none"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "min_attempts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Attempts"
+          },
+          "model": {
+            "title": "Model",
+            "type": "boolean"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "volume_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Of"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "unit",
+          "kind",
+          "source",
+          "basis",
+          "model",
+          "direction",
+          "outcome",
+          "volume_of",
+          "applies_to",
+          "min_attempts",
+          "description"
+        ],
+        "title": "MetricOut",
+        "type": "object"
+      },
+      "MetricsOut": {
+        "properties": {
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricOut"
+            },
+            "title": "Metrics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "metrics"
+        ],
+        "title": "MetricsOut",
+        "type": "object"
+      },
+      "PeerGroupOut": {
+        "properties": {
+          "min_minutes": {
+            "title": "Min Minutes",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "role",
+          "size",
+          "min_minutes",
+          "small_sample"
+        ],
+        "title": "PeerGroupOut",
+        "type": "object"
+      },
+      "PlayerCoverageOut": {
+        "properties": {
+          "matches": {
+            "title": "Matches",
+            "type": "integer"
+          },
+          "without_advanced": {
+            "title": "Without Advanced",
+            "type": "integer"
+          },
+          "without_heatmap": {
+            "title": "Without Heatmap",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "matches",
+          "without_advanced",
+          "without_heatmap"
+        ],
+        "title": "PlayerCoverageOut",
+        "type": "object"
+      },
+      "PlayerMatchesOut": {
+        "properties": {
+          "basis": {
+            "enum": [
+              "per90",
+              "rate"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/MatchValueOut"
+            },
+            "title": "Matches",
+            "type": "array"
+          },
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceOut"
+          },
+          "rate_scale": {
+            "anyOf": [
+              {
+                "enum": [
+                  "share",
+                  "percent",
+                  "metres"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Scale"
+          },
+          "stored_metric": {
+            "title": "Stored Metric",
+            "type": "string"
+          }
+        },
+        "required": [
+          "player",
+          "provenance",
+          "metric",
+          "stored_metric",
+          "basis",
+          "rate_scale",
+          "matches"
+        ],
+        "title": "PlayerMatchesOut",
+        "type": "object"
+      },
+      "PlayerOut": {
+        "properties": {
+          "country_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/PlayerCoverageOut"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "matches": {
+            "title": "Matches",
+            "type": "integer"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "not_ranked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not Ranked Reason"
+          },
+          "peer_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peer Role"
+          },
+          "primary_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Role"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceOut"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/RatingOut"
+          },
+          "role_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "starts",
+                  "listed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Source"
+          },
+          "short_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Name"
+          },
+          "six_or_eight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SixOrEightOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "starts": {
+            "title": "Starts",
+            "type": "integer"
+          },
+          "starts_by_role": {
+            "items": {
+              "$ref": "#/components/schemas/RoleStartsOut"
+            },
+            "title": "Starts By Role",
+            "type": "array"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/TeamMinutesOut"
+            },
+            "title": "Teams",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "short_name",
+          "country_code",
+          "image_url",
+          "provenance",
+          "minutes",
+          "matches",
+          "starts",
+          "teams",
+          "primary_role",
+          "role_source",
+          "starts_by_role",
+          "peer_role",
+          "six_or_eight",
+          "rating",
+          "group",
+          "not_ranked_reason",
+          "coverage"
+        ],
+        "title": "PlayerOut",
+        "type": "object"
+      },
+      "PlayerRefOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "PlayerRefOut",
+        "type": "object"
+      },
+      "ProvenanceOut": {
+        "properties": {
+          "competition": {
+            "title": "Competition",
+            "type": "string"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "season": {
+            "title": "Season",
+            "type": "string"
+          },
+          "source": {
+            "const": "pitchapi",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "scope",
+          "competition",
+          "season",
+          "computed_at"
+        ],
+        "title": "ProvenanceOut",
+        "type": "object"
+      },
+      "RatingOut": {
+        "properties": {
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average"
+          },
+          "rated_matches": {
+            "title": "Rated Matches",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "average",
+          "rated_matches"
+        ],
+        "title": "RatingOut",
+        "type": "object"
+      },
+      "RoleStartsOut": {
+        "properties": {
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "starts": {
+            "title": "Starts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "role",
+          "minutes",
+          "starts"
+        ],
+        "title": "RoleStartsOut",
+        "type": "object"
+      },
+      "ScopeOut": {
+        "properties": {
+          "aggregated": {
+            "title": "Aggregated",
+            "type": "boolean"
+          },
+          "competition": {
+            "title": "Competition",
+            "type": "string"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "country_code": {
+            "title": "Country Code",
+            "type": "string"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/CoverageOut"
+          },
+          "is_current": {
+            "title": "Is Current",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "const": "season",
+            "title": "Kind",
+            "type": "string"
+          },
+          "min_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Minutes"
+          },
+          "peer_groups": {
+            "items": {
+              "$ref": "#/components/schemas/PeerGroupOut"
+            },
+            "title": "Peer Groups",
+            "type": "array"
+          },
+          "season": {
+            "title": "Season",
+            "type": "string"
+          },
+          "source": {
+            "const": "pitchapi",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "source",
+          "competition",
+          "country_code",
+          "season",
+          "is_current",
+          "aggregated",
+          "min_minutes",
+          "computed_at",
+          "coverage",
+          "peer_groups"
+        ],
+        "title": "ScopeOut",
+        "type": "object"
+      },
+      "ScopesOut": {
+        "properties": {
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeOut"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scopes"
+        ],
+        "title": "ScopesOut",
+        "type": "object"
+      },
+      "SearchHitOut": {
+        "properties": {
+          "exact": {
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "peer_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peer Role"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "short_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Name"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "short_name",
+          "team",
+          "peer_role",
+          "minutes",
+          "score",
+          "exact"
+        ],
+        "title": "SearchHitOut",
+        "type": "object"
+      },
+      "SearchOut": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHitOut"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "scope",
+          "results"
+        ],
+        "title": "SearchOut",
+        "type": "object"
+      },
+      "SixOrEightOut": {
+        "description": "Central midfielders only (D-018). A separate block so the UI can hide it.",
+        "properties": {
+          "borderline": {
+            "title": "Borderline",
+            "type": "boolean"
+          },
+          "cut_m": {
+            "title": "Cut M",
+            "type": "number"
+          },
+          "depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth M"
+          },
+          "depth_starts": {
+            "title": "Depth Starts",
+            "type": "integer"
+          },
+          "group": {
+            "enum": [
+              "DM",
+              "CM"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "method": {
+            "enum": [
+              "depth",
+              "partner",
+              "formation"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "min_starts": {
+            "title": "Min Starts",
+            "type": "integer"
+          },
+          "partner_gap_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partner Gap M"
+          },
+          "partner_gap_rule_m": {
+            "title": "Partner Gap Rule M",
+            "type": "number"
+          },
+          "partner_starts": {
+            "title": "Partner Starts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "group",
+          "method",
+          "depth_m",
+          "depth_starts",
+          "partner_gap_m",
+          "partner_starts",
+          "borderline",
+          "cut_m",
+          "partner_gap_rule_m",
+          "min_starts"
+        ],
+        "title": "SixOrEightOut",
+        "type": "object"
+      },
+      "StatLineOut": {
+        "properties": {
+          "attempts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempts"
+          },
+          "basis": {
+            "enum": [
+              "per90",
+              "rate"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "higher",
+              "lower",
+              "none"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "matches": {
+            "title": "Matches",
+            "type": "integer"
+          },
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "boolean"
+          },
+          "pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct"
+          },
+          "per90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per90"
+          },
+          "ranked_among": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ranked Among"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          },
+          "rate_scale": {
+            "anyOf": [
+              {
+                "enum": [
+                  "share",
+                  "percent",
+                  "metres"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Scale"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "metric",
+          "label",
+          "kind",
+          "basis",
+          "model",
+          "direction",
+          "total",
+          "attempts",
+          "per90",
+          "rate",
+          "rate_scale",
+          "minutes",
+          "matches",
+          "pct",
+          "ranked_among",
+          "reason"
+        ],
+        "title": "StatLineOut",
+        "type": "object"
+      },
+      "StatsOut": {
+        "properties": {
+          "group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceOut"
+          },
+          "stats": {
+            "items": {
+              "$ref": "#/components/schemas/StatLineOut"
+            },
+            "title": "Stats",
+            "type": "array"
+          }
+        },
+        "required": [
+          "player",
+          "provenance",
+          "minutes",
+          "group",
+          "stats",
+          "missing"
+        ],
+        "title": "StatsOut",
+        "type": "object"
+      },
+      "TeamMinutesOut": {
+        "properties": {
+          "matches": {
+            "title": "Matches",
+            "type": "integer"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "minutes",
+          "matches"
+        ],
+        "title": "TeamMinutesOut",
+        "type": "object"
+      },
+      "TemplateOut": {
+        "properties": {
+          "builtin": {
+            "title": "Builtin",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "peer_role": {
+            "title": "Peer Role",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateSectionOut"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "peer_role",
+          "label",
+          "builtin",
+          "size",
+          "sections"
+        ],
+        "title": "TemplateOut",
+        "type": "object"
+      },
+      "TemplateSectionOut": {
+        "properties": {
+          "metrics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "metrics"
+        ],
+        "title": "TemplateSectionOut",
+        "type": "object"
+      },
+      "TemplatesOut": {
+        "properties": {
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateOut"
+            },
+            "title": "Templates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "templates"
+        ],
+        "title": "TemplatesOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "summary": "Read-only season stats, percentiles and position templates (PitchAPI data).",
+    "title": "Scouting API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "description": "Always answers 200; `status` says whether the database is usable.",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "description": "All metrics, in registry order (ingested first, then derived volume metrics).",
+        "operationId": "list_metrics_api_v1_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "List Metrics",
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
+    "/api/v1/metrics/{code}": {
+      "get": {
+        "operationId": "get_metric_api_v1_metrics__code__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Get Metric",
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
+    "/api/v1/players/search": {
+      "get": {
+        "description": "Accent-free fuzzy name search within one season (exact name first).",
+        "operationId": "search_players_api_v1_players_search_get",
+        "parameters": [
+          {
+            "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A name, or part of one",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "A name, or part of one",
+              "maxLength": 100,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Part of the team's name",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Part of the team's name",
+              "title": "Team"
+            }
+          },
+          {
+            "description": "A peer role: GK CB FB DM CM AM W ST",
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A peer role: GK CB FB DM CM AM W ST",
+              "title": "Role"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_minutes",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Min Minutes",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Search Players",
+        "tags": [
+          "players"
+        ]
+      }
+    },
+    "/api/v1/players/{player_id}": {
+      "get": {
+        "description": "The player card: who, where, how much, which group, and what data is missing.",
+        "operationId": "get_player_api_v1_players__player_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "title": "Player Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+              "title": "Scope",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Get Player",
+        "tags": [
+          "players"
+        ]
+      }
+    },
+    "/api/v1/players/{player_id}/matches": {
+      "get": {
+        "description": "Every appearance, oldest first, with one metric's stored value (null = no data).",
+        "operationId": "get_player_matches_api_v1_players__player_id__matches_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "title": "Player Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One metric code",
+            "in": "query",
+            "name": "metric",
+            "required": true,
+            "schema": {
+              "description": "One metric code",
+              "title": "Metric",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerMatchesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Get Player Matches",
+        "tags": [
+          "players"
+        ]
+      }
+    },
+    "/api/v1/players/{player_id}/stats": {
+      "get": {
+        "description": "The full stat table (or the chosen metrics, in the order given).",
+        "operationId": "get_player_stats_api_v1_players__player_id__stats_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "title": "Player Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated metric codes",
+            "in": "query",
+            "name": "metrics",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated metric codes",
+              "title": "Metrics"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Get Player Stats",
+        "tags": [
+          "players"
+        ]
+      }
+    },
+    "/api/v1/scopes": {
+      "get": {
+        "description": "Every season in the database, newest first. Use a scope's `key` in other requests.",
+        "operationId": "list_scopes_api_v1_scopes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "List Scopes",
+        "tags": [
+          "scopes"
+        ]
+      }
+    },
+    "/api/v1/scopes/{key}": {
+      "get": {
+        "operationId": "get_scope_api_v1_scopes__key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Get Scope",
+        "tags": [
+          "scopes"
+        ]
+      }
+    },
+    "/api/v1/templates": {
+      "get": {
+        "description": "One built-in template per peer role, in peer-role order.",
+        "operationId": "list_templates_api_v1_templates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplatesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{template_id}": {
+      "get": {
+        "description": "By id, e.g. `builtin:ST`.",
+        "operationId": "get_template_api_v1_templates__template_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Get Template",
+        "tags": [
+          "templates"
+        ]
+      }
+    }
+  }
+}

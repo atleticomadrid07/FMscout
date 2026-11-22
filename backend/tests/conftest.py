@@ -11,9 +11,9 @@ from typing import Any
 import pytest
 from sqlalchemy import Engine, select
 
-from scouting.adapters.pitchapi.cache import CachedFetcher
+from scouting.adapters.pitchapi.cache import CachedFetcher, cache_key
 from scouting.adapters.pitchapi.client import ApiResponse
-from scouting.adapters.pitchapi.raw_store import RawStore
+from scouting.adapters.pitchapi.raw_store import RawRecord, RawStore
 from scouting.db import models  # noqa: F401  (registers every table on Base.metadata)
 from scouting.db.base import Base, make_engine
 from scouting.ingest.season import sync_season
@@ -150,3 +150,40 @@ def synced_season(db_engine: Engine, tmp_path: Path, season_responses: SeasonRes
         fetcher = CachedFetcher(store, _SeasonApi(season_responses), now=lambda: FIXTURE_FETCHED_AT)
         sync_season(fetcher, db_engine, "l_FIXT01", "2025/2026")
     return db_engine
+
+
+# --- the API over a migrated database (slice 3a) ------------------------------------------------
+
+FIXTURE_LIST_PARAMS: dict[str, str] = {"season": "2025/2026", "status": "played"}
+
+
+@pytest.fixture
+def api_db(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, season_responses: dict[str, Any]
+) -> str:
+    """A migrated scouting.db (Alembic, so the API's schema check passes) and a raw.db with
+    the whole fixture season, wired up through the environment like the CLI tests' `seeded`.
+    Returns the database URL; nothing is synced yet."""
+    from alembic import command
+
+    from scouting.db.schema_version import alembic_config, head_revision
+
+    if head_revision() is None:
+        pytest.skip("no migrations yet")
+    database_url = f"sqlite:///{tmp_path / 'scouting.db'}"
+    raw_path = tmp_path / "raw.db"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("RAW_DB_PATH", str(raw_path))
+    monkeypatch.setenv("LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("PITCHAPI_API_KEY", "")
+    command.upgrade(alembic_config(database_url), "head")
+    with RawStore(raw_path) as store:
+        for path, data in season_responses.items():
+            params = FIXTURE_LIST_PARAMS if path.endswith("/matches") else {}
+            store.put(
+                RawRecord(
+                    cache_key(path, params), path, params, 200, None, None, data,
+                    FIXTURE_FETCHED_AT,
+                )
+            )  # fmt: skip
+    return database_url
