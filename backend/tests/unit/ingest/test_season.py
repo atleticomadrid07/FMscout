@@ -7,6 +7,7 @@ Uses the three-match fixture season from conftest.py (hand-made data, not PitchA
 from __future__ import annotations
 
 import copy
+import sqlite3
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ from scouting.adapters.pitchapi.cache import CachedFetcher
 from scouting.adapters.pitchapi.client import ApiResponse
 from scouting.adapters.pitchapi.raw_store import RawStore
 from scouting.db.base import Base, make_engine
-from scouting.db.models import Match, Player, PlayerSourceId, SyncState
+from scouting.db.models import Appearance, Match, Player, PlayerSourceId, SyncState
 from scouting.db.reports import checksum, formation_report
 from scouting.ingest.profiles import sync_profiles
 from scouting.ingest.progress import Progress
@@ -80,10 +81,10 @@ def run(engine: Engine, store: RawStore, api: FakeApi | None, **kwargs: Any) -> 
     return sync_season(CachedFetcher(store, api, now=lambda: T0), engine, LEAGUE, SEASON, **kwargs)
 
 
-def statuses(engine: Engine) -> list[tuple[str, str, str]]:
+def statuses(engine: Engine) -> list[tuple[str, str, str, str]]:
     with Session(engine) as session:
         return [
-            (m.players_status, m.advanced_status, m.lineups_status)
+            (m.players_status, m.advanced_status, m.lineups_status, m.heatmaps_status)
             for m in session.scalars(select(Match).order_by(Match.kickoff_utc))
         ]
 
@@ -95,11 +96,11 @@ def test_full_run_processes_every_match_and_profiles(db_engine: Engine, raw_stor
                                                       api: FakeApi) -> None:  # fmt: skip
     summary = run(db_engine, raw_store, api)
     assert (summary.to_process, summary.processed) == (3, 3)
-    assert statuses(db_engine) == [("ok", "ok", "ok")] * 3
+    assert statuses(db_engine) == [("ok", "ok", "ok", "ok")] * 3
     assert summary.failed == [] and not summary.interrupted and summary.still_pending == 0
     assert summary.profiles is not None
     assert (summary.profiles.updated, summary.profiles.not_found) == (13, 1)  # 14 players
-    assert len(api.calls) == 2 + 3 * 3 + 14
+    assert len(api.calls) == 2 + 4 * 3 + 14  # 4 per match since heatmaps (slice 2d)
 
 
 def test_profiles_fill_player_fields(db_engine: Engine, raw_store: RawStore, api: FakeApi) -> None:
@@ -158,12 +159,12 @@ def test_resume_after_crash_equals_an_uninterrupted_run(
     with RawStore(tmp_path / "reference_raw.db") as reference_raw:
         run(reference, reference_raw, FakeApi(season_responses))
 
-    # CrashError on call 6: leagues, match list, m_FIXT01 x3 succeed; m_FIXT02's first call dies.
+    # CrashError on call 7: leagues, match list, m_FIXT01 x4 succeed; m_FIXT02's first call dies.
     crashed = fresh_db(tmp_path, "crashed.db")
-    api.fail_at = 6
+    api.fail_at = 7
     with pytest.raises(CrashError):
         run(crashed, raw_store, api)
-    assert statuses(crashed) == [("ok", "ok", "ok"), ("pending",) * 3, ("pending",) * 3]
+    assert statuses(crashed) == [("ok",) * 4, ("pending",) * 4, ("pending",) * 4]
 
     api.fail_at = None
     resumed = run(crashed, raw_store, api)
@@ -178,7 +179,7 @@ def test_ctrl_c_stops_cleanly_and_skips_profiles(
     summary = run(db_engine, raw_store, api)
     assert summary.interrupted and summary.profiles is None
     assert summary.processed == 1
-    assert statuses(db_engine)[1] == ("pending", "pending", "pending")  # rolled back
+    assert statuses(db_engine)[1] == ("pending",) * 4  # rolled back
 
 
 # --- failures and re-checks -------------------------------------------------------------------
@@ -193,7 +194,7 @@ def test_bad_match_is_reported_and_does_not_block_the_season(
     summary = run(db_engine, raw_store, api)
     assert [match_id for match_id, _ in summary.failed] == ["m_FIXT02"]
     assert summary.processed == 2
-    assert statuses(db_engine)[1] == ("pending", "pending", "pending")  # retried next run
+    assert statuses(db_engine)[1] == ("pending",) * 4  # retried next run
 
 
 def test_unavailable_analytics_are_rechecked_from_cache(
@@ -233,6 +234,63 @@ def test_offline_without_cached_profiles_counts_them(
     run(db_engine, raw_store, api, profiles=False)
     summary = run(db_engine, raw_store, None, renormalize=True)
     assert summary.profiles is not None and summary.profiles.not_cached == 14
+
+
+# --- heatmaps arriving after the rest (slice 2d) -------------------------------------------------
+
+
+def forget_heatmaps(tmp_path: Path) -> None:
+    """Drop the cached heatmaps, as in a raw.db filled before slice 2d existed."""
+    with sqlite3.connect(tmp_path / "raw.db") as connection:
+        connection.execute("DELETE FROM raw_response WHERE path LIKE '%/heatmaps'")
+
+
+def depths(engine: Engine) -> list[float | None]:
+    with Session(engine) as session:
+        return list(session.scalars(select(Appearance.depth).order_by(Appearance.id)))
+
+
+def test_offline_run_without_heatmaps_leaves_them_pending(
+    db_engine: Engine, raw_store: RawStore, api: FakeApi, tmp_path: Path
+) -> None:
+    run(db_engine, raw_store, api)
+    forget_heatmaps(tmp_path)
+    before = fresh_db(tmp_path, "before_2d.db")
+    summary = run(before, raw_store, None)  # offline: heatmaps were never fetched
+    assert summary.processed == 3 and summary.failed == []
+    assert (summary.heatmaps_pending, summary.heatmaps_missing) == (3, 0)
+    assert statuses(before) == [("ok", "ok", "ok", "pending")] * 3
+    assert set(depths(before)) == {None}
+    assert summary.still_pending == 0  # pending heatmaps don't hold back the aggregates
+
+
+def test_online_run_fetches_only_the_missing_heatmaps(
+    db_engine: Engine, raw_store: RawStore, api: FakeApi, tmp_path: Path
+) -> None:
+    run(db_engine, raw_store, api)
+    forget_heatmaps(tmp_path)
+    upgraded = fresh_db(tmp_path, "upgraded.db")
+    run(upgraded, raw_store, None)
+    calls = len(api.calls)
+    summary = run(upgraded, raw_store, api)
+    assert summary.processed == 3  # the matches with pending heatmaps
+    assert api.calls[calls:] == [f"/v1/matches/m_FIXT0{i}/heatmaps" for i in (1, 2, 3)]
+    assert statuses(upgraded) == [("ok", "ok", "ok", "ok")] * 3
+    # The same database as a season synced with heatmaps from the start.
+    assert checksum(upgraded) == checksum(db_engine)
+
+
+def test_missing_heatmaps_are_rechecked_like_analytics(
+    db_engine: Engine, raw_store: RawStore, api: FakeApi
+) -> None:
+    api.not_found["/v1/matches/m_FIXT02/heatmaps"] = "RESOURCE_NOT_FOUND"
+    first = run(db_engine, raw_store, api)
+    assert first.heatmaps_missing == 1
+    assert statuses(db_engine)[1] == ("ok", "ok", "ok", "missing")
+    calls = len(api.calls)
+    second = run(db_engine, raw_store, api)
+    assert second.processed == 1  # m_FIXT02 is looked at again...
+    assert len(api.calls) == calls  # ...but the 404 is still fresh: no request
 
 
 # --- reports ------------------------------------------------------------------------------------
@@ -296,7 +354,7 @@ def test_ctrl_c_during_profiles_keeps_finished_chunks(
 def test_ctrl_c_during_season_profiles_marks_the_run_interrupted(
     db_engine: Engine, raw_store: RawStore, api: FakeApi
 ) -> None:
-    api.fail_at, api.fail_with = 2 + 9 + 3, KeyboardInterrupt()  # third profile request
+    api.fail_at, api.fail_with = 2 + 12 + 3, KeyboardInterrupt()  # third profile request
     summary = run(db_engine, raw_store, api)
     assert summary.processed == 3 and summary.interrupted
     assert summary.profiles is not None and summary.profiles.interrupted

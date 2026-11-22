@@ -1,6 +1,6 @@
-"""Canonical tables (SCHEMA.md §4-§5). Slice 1b: competitions, seasons, teams, matches,
+"""Canonical tables (SCHEMA.md §4-§6). Slice 1b: competitions, seasons, teams, matches,
 their source-ID maps, and sync state. Slice 1c: players, appearances, metrics, stat values
-and formation roles.
+and formation roles. Slice 2a: aggregate scopes and per-player season totals.
 
 Conventions:
 - Internal INTEGER surrogate keys everywhere; external IDs live only in *_source_id.
@@ -18,7 +18,7 @@ from sqlalchemy import CheckConstraint, ForeignKey, Index, String, UniqueConstra
 from sqlalchemy.orm import Mapped, mapped_column
 
 from scouting.db.base import Base
-from scouting.domain.positions import ROLES, SIDES
+from scouting.domain.positions import PEER_ROLES, ROLES, SIDES
 from scouting.metrics.registry import ABSENCE_POLICIES, AGGREGATIONS, APPLIES_TO
 from scouting.metrics.registry import KINDS as METRIC_KINDS
 from scouting.metrics.registry import SOURCES as METRIC_SOURCES
@@ -27,6 +27,11 @@ SOURCES: Final = ("pitchapi", "fm24")
 PLAYER_ORIGINS: Final = ("real", "fm")
 FETCH_STATUSES: Final = ("pending", "ok", "missing")
 ADVANCED_STATUSES: Final = ("pending", "ok", "unavailable")
+SCOPE_KINDS: Final = ("season", "fm_import")
+PERCENTILE_BASES: Final = ("per90", "rate")
+ROLE_SOURCES: Final = ("starts", "listed")
+# How a central midfielder's 6/8 group was decided (D-018; metrics/depth.py).
+PEER_METHODS: Final = ("depth", "partner", "formation")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -132,6 +137,12 @@ class Match(Base):
     lineups_status: Mapped[str] = mapped_column(
         String(16), default="pending", server_default="pending"
     )
+    # Slice 2d: 'pending' (not fetched yet, e.g. an offline run), 'ok' or 'missing'. No CHECK:
+    # SQLite can't add one to an existing table without rebuilding it, and `appearance`
+    # references `match` (ERRORS.md); the values are FETCH_STATUSES, set only by the sync.
+    heatmaps_status: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending"
+    )
     normalized_at: Mapped[datetime | None]  # naive UTC; set when per-match data is normalized
 
 
@@ -220,6 +231,11 @@ class Appearance(Base):
     minutes: Mapped[int]  # canonical: /players minutes_played, full match = 90 (D-010)
     minutes_actual: Mapped[int | None]  # advanced minutes incl. stoppage; reference only
     rating: Mapped[float | None]  # rating_title; NULL = not rated (short cameo, or no ratings)
+    # Slice 2d: where on the pitch the player's actions were, from the match heatmap.
+    # depth = actions-weighted mean along the pitch, 0 = own goal line, 1 = opponent's;
+    # depth_actions = how many actions it rests on. NULL: no heatmap, or no actions.
+    depth: Mapped[float | None]
+    depth_actions: Mapped[int | None]
 
 
 # --- metric registry and values -------------------------------------------------------------
@@ -255,6 +271,11 @@ class Metric(Base):
     is_model_output: Mapped[bool]
     higher_is_better: Mapped[bool]
     description: Mapped[str] = mapped_column(String(500))
+    # Percentile eligibility and colouring (slice 2b, D-014). No CHECK on `direction`: SQLite
+    # can't add one to an existing table without rebuilding it; the registry is validated by
+    # tests instead. Plain string default, per the D-013 migration rule.
+    min_attempts: Mapped[int | None]  # fractions: fewest season attempts for a percentile
+    direction: Mapped[str] = mapped_column(String(8), server_default="higher")
 
 
 class StatValue(Base):
@@ -288,3 +309,182 @@ class FormationRole(Base):
     slot_code: Mapped[int] = mapped_column(primary_key=True)
     role: Mapped[str] = mapped_column(String(4))
     side: Mapped[str] = mapped_column(String(1))
+
+
+# --- aggregates (Phase 2, slice 2a; SCHEMA §6) -----------------------------------------------
+#
+# Rebuilt per scope in one transaction (delete, then insert) by scouting.metrics.aggregate.
+# Nothing here is edited by hand, and nothing reads stat_value at request time.
+
+
+class Scope(Base):
+    """What an aggregate is computed over: one competition-season, or (Phase 6) one FM import.
+    Real seasons and FM snapshots share the aggregate tables through this."""
+
+    __tablename__ = "scope"
+    __table_args__ = (
+        CheckConstraint(_in("kind", SCOPE_KINDS), name="kind"),
+        CheckConstraint(
+            "(kind = 'season' AND season_id IS NOT NULL AND fm_import_id IS NULL)"
+            " OR (kind = 'fm_import' AND fm_import_id IS NOT NULL AND season_id IS NULL)",
+            name="one_target",
+        ),
+        UniqueConstraint("season_id"),
+        UniqueConstraint("fm_import_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("season.id", ondelete="CASCADE"))
+    fm_import_id: Mapped[int | None]  # FK to fm_import once that table exists (Phase 6)
+
+
+class PlayerScope(Base):
+    """One player's season (or FM snapshot): minutes, role and rating."""
+
+    __tablename__ = "player_scope"
+    __table_args__ = (
+        CheckConstraint(
+            f"primary_role IS NULL OR {_in('primary_role', ROLES)}", name="primary_role"
+        ),
+        CheckConstraint(f"peer_role IS NULL OR {_in('peer_role', PEER_ROLES)}", name="peer_role"),
+        CheckConstraint(
+            f"role_source IS NULL OR {_in('role_source', ROLE_SOURCES)}", name="role_source"
+        ),
+        CheckConstraint(
+            f"peer_method IS NULL OR {_in('peer_method', PEER_METHODS)}", name="peer_method"
+        ),
+        Index(None, "scope_id", "peer_role"),
+    )
+
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    scope_id: Mapped[int] = mapped_column(
+        ForeignKey("scope.id", ondelete="CASCADE"), primary_key=True
+    )
+    minutes: Mapped[int]  # all appearances, canonical minutes (D-010)
+    matches: Mapped[int]
+    starts: Mapped[int]
+    primary_role: Mapped[str | None] = mapped_column(String(4))
+    peer_role: Mapped[str | None] = mapped_column(String(4))
+    # 'starts': most minutes as a starter. 'listed': no starts, from the profile's listed
+    # slot where every formation agrees. NULL: neither gave a role.
+    role_source: Mapped[str | None] = mapped_column(String(8))
+    avg_rating: Mapped[float | None]  # mean over rated matches only
+    rated_matches: Mapped[int]
+    computed_at: Mapped[datetime]  # latest normalized_at of the scope's matches: deterministic
+    # Central midfielders only (peer role DM or CM; NULL for everyone else), D-018: how the
+    # 6/8 group was decided, and the season depths behind it. Depths are shares of the pitch
+    # length, like appearance.depth (x 105 for metres).
+    peer_method: Mapped[str | None] = mapped_column(String(10))  # depth, partner, formation
+    depth: Mapped[float | None]  # in front of his centre-backs, minutes-weighted
+    depth_starts: Mapped[int | None]  # central-mid starts with a heatmap behind `depth`
+    partner_gap: Mapped[float | None]  # + = his deepest fellow central mid played deeper
+    partner_starts: Mapped[int | None]  # of those starts, how many beside another central mid
+
+
+class PlayerScopeTeam(Base):
+    """Minutes per team inside one scope (a mid-season move within a competition)."""
+
+    __tablename__ = "player_scope_team"
+
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    scope_id: Mapped[int] = mapped_column(
+        ForeignKey("scope.id", ondelete="CASCADE"), primary_key=True
+    )
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.id"), primary_key=True)
+    minutes: Mapped[int]
+    matches: Mapped[int]
+
+
+class PlayerScopeRole(Base):
+    """Minutes as a starter in each detailed role: shows how primary_role was chosen."""
+
+    __tablename__ = "player_scope_role"
+    __table_args__ = (CheckConstraint(_in("role", ROLES), name="role"),)
+
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    scope_id: Mapped[int] = mapped_column(
+        ForeignKey("scope.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(String(4), primary_key=True)
+    minutes: Mapped[int]
+    starts: Mapped[int]
+
+
+class PlayerScopeStat(Base):
+    """One metric over one scope. `minutes` is this metric's exposure: the minutes of the
+    appearances that counted for it, not the player's total (SCHEMA §6)."""
+
+    __tablename__ = "player_scope_stat"
+    __table_args__ = (
+        CheckConstraint("minutes >= 0", name="minutes"),
+        Index(None, "scope_id", "metric_id"),
+        {"sqlite_with_rowid": False},
+    )
+
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    scope_id: Mapped[int] = mapped_column(
+        ForeignKey("scope.id", ondelete="CASCADE"), primary_key=True
+    )
+    metric_id: Mapped[int] = mapped_column(ForeignKey("metric.id"), primary_key=True)
+    total: Mapped[float | None]  # successes for fractions; NULL = nothing known
+    denominator: Mapped[float | None]  # attempts (or weight), fractions only
+    minutes: Mapped[int]
+    matches_with_value: Mapped[int]
+    per90: Mapped[float | None]  # counts, model outputs, distances; NULL when minutes = 0
+    rate: Mapped[float | None]  # fractions: total / denominator; NULL when denominator = 0
+
+
+# --- peer groups and percentiles (slice 2b; D-014) --------------------------------------------
+
+
+class PeerGroup(Base):
+    """Players of one peer role in one scope with at least `min_minutes`. Upserted on rebuild
+    (not deleted), so its ID stays stable and `report checksum` doesn't change."""
+
+    __tablename__ = "peer_group"
+    __table_args__ = (
+        CheckConstraint(_in("peer_role", PEER_ROLES), name="peer_role"),
+        UniqueConstraint("scope_id", "peer_role", "min_minutes"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scope_id: Mapped[int] = mapped_column(ForeignKey("scope.id", ondelete="CASCADE"))
+    peer_role: Mapped[str] = mapped_column(String(4))
+    min_minutes: Mapped[int]
+    size: Mapped[int]  # players in the group; a metric can rank fewer (see ranked_among)
+    computed_at: Mapped[datetime]
+
+
+class Percentile(Base):
+    """One player's rank on one metric within a peer group. Stored raw: a low value is a low
+    percentile even for lower-is-better metrics (the UI flips those). A player who isn't
+    eligible for a metric (too few minutes on it, too few attempts) has no row."""
+
+    __tablename__ = "percentile"
+    __table_args__ = (
+        CheckConstraint(_in("basis", PERCENTILE_BASES), name="basis"),
+        CheckConstraint("pct >= 0 AND pct <= 100", name="pct"),
+        Index(None, "player_id"),
+        {"sqlite_with_rowid": False},
+    )
+
+    peer_group_id: Mapped[int] = mapped_column(
+        ForeignKey("peer_group.id", ondelete="CASCADE"), primary_key=True
+    )
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("player.id", ondelete="CASCADE"), primary_key=True
+    )
+    metric_id: Mapped[int] = mapped_column(ForeignKey("metric.id"), primary_key=True)
+    basis: Mapped[str] = mapped_column(String(8))  # per90 or rate
+    value: Mapped[float]  # the per-90 or rate that was ranked
+    pct: Mapped[float]  # midpoint percentile, 0-100
+    ranked_among: Mapped[int]  # eligible players for this metric in the group

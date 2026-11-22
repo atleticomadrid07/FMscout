@@ -24,7 +24,7 @@ from scouting.adapters.pitchapi.client import build_path
 from scouting.adapters.pitchapi.raw_store import RawRecord
 from scouting.adapters.pitchapi.schemas import PlayerProfile
 from scouting.db.models import Player, PlayerSourceId, to_utc_naive
-from scouting.ingest.match_detail import search_name
+from scouting.domain.names import search_name
 from scouting.ingest.match_list import SOURCE, SyncError
 from scouting.ingest.progress import Progress
 

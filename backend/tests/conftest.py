@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from sqlalchemy import Engine, select
 
+from scouting.adapters.pitchapi.cache import CachedFetcher
+from scouting.adapters.pitchapi.client import ApiResponse
+from scouting.adapters.pitchapi.raw_store import RawStore
 from scouting.db import models  # noqa: F401  (registers every table on Base.metadata)
 from scouting.db.base import Base, make_engine
+from scouting.ingest.season import sync_season
 
 PITCHAPI_FIXTURES = Path(__file__).parent / "fixtures" / "pitchapi"
 
@@ -76,16 +81,18 @@ def season_responses(load_fixture: LoadFixture) -> SeasonResponses:
     players = load_fixture("match_players.json")
     advanced = load_fixture("match_advanced.json")["players"]
     lineups = load_fixture("match_lineups.json")
+    heatmaps = load_fixture("match_heatmaps.json")  # slice 2d
 
-    def side(template: str, team: str, letter: str) -> tuple[Any, Any, Any]:
+    def side(template: str, team: str, letter: str) -> tuple[Any, Any, Any, Any]:
         source_team, lineup_side = _TEMPLATES[template]
         picked = (
             [r for r in players if r["team_id"] == source_team],
             [r for r in advanced if r["team_id"] == source_team],
             lineups[lineup_side],
+            [r for r in heatmaps["players"] if r["team"]["id"] == source_team],
         )
         text = json.dumps(picked).replace("p_FX", f"p_{letter}").replace(source_team, team)
-        loaded: tuple[Any, Any, Any] = tuple(json.loads(text))
+        loaded: tuple[Any, Any, Any, Any] = tuple(json.loads(text))
         return loaded
 
     responses: SeasonResponses = {
@@ -94,11 +101,17 @@ def season_responses(load_fixture: LoadFixture) -> SeasonResponses:
     }
     names: dict[str, str] = {}
     for match_id, home, away in SEASON_MATCHES:
-        h_rows, h_adv, h_side = side(home[1], home[0], home[2])
-        a_rows, a_adv, a_side = side(away[1], away[0], away[2])
+        h_rows, h_adv, h_side, h_heat = side(home[1], home[0], home[2])
+        a_rows, a_adv, a_side, a_heat = side(away[1], away[0], away[2])
         responses[f"/v1/matches/{match_id}/players"] = h_rows + a_rows
         responses[f"/v1/matches/{match_id}/advanced/players"] = {"players": h_adv + a_adv}
         responses[f"/v1/matches/{match_id}/lineups"] = {"home": h_side, "away": a_side}
+        responses[f"/v1/matches/{match_id}/heatmaps"] = {
+            "match_id": match_id,
+            "grid": heatmaps["grid"],
+            "teams": [],  # not used by the sync
+            "players": h_heat + a_heat,
+        }
         names.update({r["player"]["id"]: r["player"]["name"] for r in h_rows + a_rows})
     for player_id, name in names.items():
         first, _, last = name.partition(" ")
@@ -112,3 +125,28 @@ def season_responses(load_fixture: LoadFixture) -> SeasonResponses:
             "image_url": None,
         }
     return responses
+
+
+class _SeasonApi:
+    """Serves the fixture season; every response is fetched at FIXTURE_FETCHED_AT."""
+
+    def __init__(self, responses: SeasonResponses) -> None:
+        self.responses = responses
+
+    def get(self, path: str, params: Mapping[str, str] | None = None) -> ApiResponse:
+        return ApiResponse(
+            path=path, params=dict(params or {}), status=200, data=self.responses[path],
+            error_code=None, error_message=None, fetched_at=FIXTURE_FETCHED_AT,
+        )  # fmt: skip
+
+
+FIXTURE_FETCHED_AT = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def synced_season(db_engine: Engine, tmp_path: Path, season_responses: SeasonResponses) -> Engine:
+    """db_engine with the whole three-match fixture season synced (profiles included)."""
+    with RawStore(tmp_path / "season_raw.db") as store:
+        fetcher = CachedFetcher(store, _SeasonApi(season_responses), now=lambda: FIXTURE_FETCHED_AT)
+        sync_season(fetcher, db_engine, "l_FIXT01", "2025/2026")
+    return db_engine

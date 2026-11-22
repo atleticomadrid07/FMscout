@@ -10,6 +10,7 @@ from scouting.domain.positions import (
     PEER_ROLE,
     ROLES,
     formation_role_rows,
+    listed_slot_roles,
     role_for,
     side_for,
 )
@@ -70,7 +71,8 @@ def test_known_players(player: str, formation: str, slot: int, expected: tuple[s
 
 
 def test_same_slot_differs_by_formation() -> None:
-    assert role_for("3-4-2-1", 84) == ("AM", "R")  # a 10
+    assert role_for("3-4-2-1", 84) == ("W", "R")  # an inside forward (D-016)
+    assert role_for("4-3-2-1", 84) == ("AM", "R")  # a 10
     assert role_for("4-1-4-1", 84) == ("CM", "R")  # an 8 in front of a single pivot
 
 
@@ -82,7 +84,7 @@ def test_unmapped_returns_none(formation: str | None, slot: int) -> None:
 def test_every_role_has_a_peer_group() -> None:
     assert set(PEER_ROLE) == set(ROLES)
     assert PEER_ROLE["AM"] == "AM"  # 10s are their own group (D-011)
-    assert PEER_ROLE["WB"] == "FB" and PEER_ROLE["DM"] == "CM"
+    assert PEER_ROLE["WB"] == "FB" and PEER_ROLE["DM"] == "DM"  # 6s their own group (D-018)
 
 
 def test_formation_role_rows_cover_every_slot() -> None:
@@ -99,7 +101,9 @@ def test_formation_role_rows_cover_every_slot() -> None:
         ("5-3-1-1", 95, ("AM", "C")),
         ("4-1-3-2", 83, ("CM", "R")),  # b: narrow diamond → CM
         ("4-1-3-2", 87, ("CM", "L")),
-        ("4-3-2-1", 84, ("AM", "R")),  # c: as in 3-4-2-1
+        ("4-3-2-1", 84, ("AM", "R")),  # c: 10s (kept when 3-4-2-1's became W, D-016)
+        ("3-4-2-1", 84, ("W", "R")),  # 2c: inside forwards, mostly wingers by trade (D-016)
+        ("3-4-2-1", 86, ("W", "L")),
         ("5-4-1", 72, ("W", "R")),  # d: wide midfielders go with wingers (D-011)
         ("5-4-1", 51, ("WB", "R")),
     ],
@@ -115,3 +119,26 @@ def test_every_formation_has_one_keeper_and_ten_outfield_slots() -> None:
         assert list(slots.values()).count("GK") == 1, formation
         defenders = sum(1 for slot in slots if 30 <= slot < 60)
         assert defenders == int(formation.split("-")[0]), formation  # rows 3 and 5
+
+
+@pytest.mark.parametrize(
+    ("slot", "expected"),
+    [
+        (11, ("GK", "GK")),
+        (32, ("FB", "FB")),
+        (36, ("CB", "CB")),
+        (64, (None, "CM")),  # DM in 4-2-3-1, CM in 3-4-2-1: same peer group
+        (85, ("AM", "AM")),
+        (95, ("AM", "AM")),
+        (115, ("ST", "ST")),
+        (84, (None, None)),  # W in 3-4-2-1, AM in 4-3-2-1, CM in 4-1-4-1: undecided
+        (83, (None, None)),  # W in 4-2-3-1 but CM in 4-1-3-2
+        (72, (None, None)),  # W in 4-4-2 but WB in 3-4-3
+        (2, (None, None)),  # a broad category, not a slot
+        (None, (None, None)),
+    ],
+)
+def test_listed_slot_roles_only_when_every_formation_agrees(
+    slot: int | None, expected: tuple[str | None, str | None]
+) -> None:
+    assert listed_slot_roles(slot) == expected

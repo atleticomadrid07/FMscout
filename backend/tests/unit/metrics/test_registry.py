@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from scouting.metrics.registry import (
     BY_CODE,
+    INGESTED,
     KEEPER_ONLY_KEYS,
     KNOWN_PLAYER_KEYS,
+    OUTCOMES,
     REGISTRY,
+    VOLUMES,
 )
 
 
@@ -15,7 +18,7 @@ def test_codes_are_unique() -> None:
 
 
 def test_each_source_key_is_used_once_per_source() -> None:
-    keys = [(m.source, m.source_key) for m in REGISTRY]
+    keys = [(m.source, m.source_key) for m in INGESTED]  # volume metrics share their parent's
     assert len(set(keys)) == len(keys)
 
 
@@ -53,7 +56,42 @@ def test_keeper_metrics_use_keeper_only_fields() -> None:
 
 
 def test_registry_size() -> None:
-    assert len(REGISTRY) == 95
+    assert (len(INGESTED), len(VOLUMES), len(REGISTRY)) == (95, 5, 100)
+
+
+# --- slice 2e: volume metrics and outcomes ------------------------------------------------------
+
+
+def test_volume_metrics_mirror_a_success_rate_parent() -> None:
+    for volume in VOLUMES:
+        assert volume.volume_of is not None
+        parent = BY_CODE[volume.volume_of]
+        assert parent.is_fraction and not parent.value_is_rate and parent.volume_of is None
+        assert (volume.source, volume.source_key, volume.applies_to) == (
+            parent.source, parent.source_key, parent.applies_to,
+        )  # fmt: skip
+        assert volume.kind == "count" and volume.per90_allowed and volume.min_attempts is None
+        assert volume.direction == "higher" and not volume.outcome
+    assert {v.volume_of for v in VOLUMES} == {
+        "passes_completed", "crosses_completed", "dribbles_completed",
+        "long_balls_completed", "aerials_won",
+    }  # fmt: skip
+
+
+def test_registry_order_keeps_ingested_metrics_first() -> None:
+    """Metric IDs are assigned in registry order on a new database: the 95 ingested
+    metrics keep the IDs they had before the volume metrics were added."""
+    assert REGISTRY[: len(INGESTED)] == INGESTED
+
+
+def test_outcomes_are_known_metrics() -> None:
+    assert set(BY_CODE) >= OUTCOMES
+    assert {m.code for m in REGISTRY if m.outcome} == OUTCOMES
+    assert not any(BY_CODE[code].is_model_output for code in OUTCOMES)
+
+
+def test_passing_minimum_lowered_for_strikers() -> None:
+    assert BY_CODE["passes_completed"].min_attempts == 100  # decision E
 
 
 def test_denominator_key_only_for_advanced_fractions() -> None:
@@ -90,3 +128,21 @@ def test_chances_created_is_never_double_counted() -> None:
     assert "passing.key_passes" in keys
     assert "creation.chances_created" not in keys
     assert "Never add it to key_passes" in BY_CODE["chances_created"].description
+
+
+def test_every_fraction_has_a_minimum_and_nothing_else_does() -> None:
+    from scouting.metrics.registry import MIN_ATTEMPTS, NO_DIRECTION
+
+    fractions = {m.code for m in REGISTRY if m.is_fraction}
+    assert set(MIN_ATTEMPTS) == fractions
+    assert all(MIN_ATTEMPTS[code] > 0 for code in fractions)
+    assert {m.code for m in REGISTRY} >= NO_DIRECTION
+
+
+def test_direction_follows_higher_is_better_unless_a_style_metric() -> None:
+    by_code = {m.code: m for m in REGISTRY}
+    assert by_code["npxg"].direction == "higher"
+    assert by_code["dispossessed"].direction == "lower"
+    assert {m.code for m in REGISTRY if m.direction == "none"} == {
+        "launch_pct", "avg_pass_length", "corners",
+    }  # fmt: skip

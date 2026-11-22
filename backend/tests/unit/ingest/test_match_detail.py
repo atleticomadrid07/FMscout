@@ -4,7 +4,9 @@ policies, `applies_to`, idempotency, missing endpoints, and error cases.
 Uses the hand-made fixture match m_FIXT01 (tests/fixtures/pitchapi/match_*.json):
   home Example Athletic, 4-2-3-1: GK Ada (11), LB Bea (38), ST Cal (115),
        sub Dev (MID, 12'), unused sub Eli
-  away Sample Rovers, 3-4-2-1:    GK Fay (11), 10 Gus (84), sub keeper Hal (5', not rated)
+  away Sample Rovers, 3-4-2-1:    GK Fay (11), Gus (84, W since D-016), sub keeper Hal
+       (5', not rated)
+Heatmaps (slice 2d): every player who played has a grid; Hal's has no actions.
 """
 
 from __future__ import annotations
@@ -31,22 +33,27 @@ from scouting.db.models import (
     StatValue,
 )
 from scouting.domain.positions import FORMATION_ROLES
-from scouting.ingest.match_detail import MatchDetailSummary, find_match, normalize_match
+from scouting.ingest.match_detail import (
+    MatchDetailSummary,
+    find_match,
+    heatmap_depth,
+    normalize_match,
+)
 from scouting.ingest.match_list import SyncError, normalize_match_list
-from scouting.metrics.registry import REGISTRY
+from scouting.metrics.registry import INGESTED, REGISTRY
 
 T0 = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 MATCH = "m_FIXT01"
-OUTFIELD_METRICS = sum(1 for m in REGISTRY if m.applies_to != "gk")
-GK_METRICS = sum(1 for m in REGISTRY if m.applies_to != "outfield")
+OUTFIELD_METRICS = sum(1 for m in INGESTED if m.applies_to != "gk")
+GK_METRICS = sum(1 for m in INGESTED if m.applies_to != "outfield")
 ADVANCED_OUTFIELD = sum(
-    1 for m in REGISTRY if m.source == "pitchapi_advanced" and m.applies_to != "gk"
+    1 for m in INGESTED if m.source == "pitchapi_advanced" and m.applies_to != "gk"
 )
 ADVANCED_GK = sum(
-    1 for m in REGISTRY if m.source == "pitchapi_advanced" and m.applies_to != "outfield"
+    1 for m in INGESTED if m.source == "pitchapi_advanced" and m.applies_to != "outfield"
 )
 # Metrics read from the advanced `goalkeeping` group, which is null for sub keepers (Hal).
-GOALKEEPING_GROUP = sum(1 for m in REGISTRY if m.source_key.startswith("goalkeeping."))
+GOALKEEPING_GROUP = sum(1 for m in INGESTED if m.source_key.startswith("goalkeeping."))
 SUB_KEEPER_METRICS = GK_METRICS - GOALKEEPING_GROUP
 
 
@@ -80,7 +87,8 @@ Normalize = Callable[..., MatchDetailSummary]
 
 @pytest.fixture
 def normalize(match_db: Engine, load_fixture: Any) -> Normalize:
-    """Normalize m_FIXT01; any endpoint can be overridden with data or a RawRecord."""
+    """Normalize m_FIXT01; any endpoint can be overridden with data or a RawRecord, and
+    heatmaps with None (never fetched, as in an offline run)."""
 
     def run(**overrides: Any) -> MatchDetailSummary:
         records = {
@@ -88,14 +96,23 @@ def normalize(match_db: Engine, load_fixture: Any) -> Normalize:
             "advanced": record("advanced/players", load_fixture("match_advanced.json")),
             "lineups": record("lineups", load_fixture("match_lineups.json")),
         }
+        heatmaps: RawRecord | None = record("heatmaps", load_fixture("match_heatmaps.json"))
         for name, value in overrides.items():
-            if isinstance(value, RawRecord):
+            if name == "heatmaps":
+                heatmaps = (
+                    value
+                    if value is None or isinstance(value, RawRecord)
+                    else (record("heatmaps", value))
+                )
+            elif isinstance(value, RawRecord):
                 records[name] = value
             else:
                 path = "advanced/players" if name == "advanced" else name
                 records[name] = record(path, value)
         with Session(match_db) as session, session.begin():
-            return normalize_match(session, find_match(session, MATCH), **records)
+            return normalize_match(
+                session, find_match(session, MATCH), heatmaps=heatmaps, **records
+            )
 
     return run
 
@@ -144,7 +161,7 @@ def test_appearances_only_for_players_with_minutes(match_db: Engine, normalize: 
         ("p_FXGK01", True, 11, None, "GK", "C", "4-2-3-1"),
         ("p_FXLB01", True, 38, None, "FB", "L", "4-2-3-1"),
         ("p_FXST01", True, 115, None, "ST", "C", "4-2-3-1"),
-        ("p_FXAM01", True, 84, None, "AM", "R", "3-4-2-1"),
+        ("p_FXAM01", True, 84, None, "W", "R", "3-4-2-1"),
         ("p_FXSB01", False, None, 2, None, None, "4-2-3-1"),  # subs get no detailed role
         ("p_FXGK03", False, None, 0, None, None, "3-4-2-1"),
     ],
@@ -356,6 +373,114 @@ def test_unknown_stat_key_is_reported_not_ingested(
         "stat": {"type": "integer", "value": 4},
     }
     assert normalize(players=players).unknown_keys == {"brand_new_metric"}
+
+
+# --- heatmaps and depth (slice 2d) -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("cells", "expected"),
+    [
+        ([], (None, 0)),  # no actions: depth undefined, not 0
+        ([(0, 5, 1)], (0.5 / 16, 1)),  # the first column's centre
+        ([(15, 0, 3)], (15.5 / 16, 3)),  # the last column's centre
+        ([(4, 10, 6), (6, 10, 2)], (5.0 / 16, 8)),  # weighted by actions: (4.5*6 + 6.5*2) / 8
+        ([(2, 0, 4), (2, 11, 4)], (2.5 / 16, 8)),  # sideways position doesn't matter
+        ([(3, 3, 0), (9, 3, 2)], (9.5 / 16, 2)),  # a cell with 0 actions has no weight
+    ],
+)
+def test_heatmap_depth(
+    cells: list[tuple[int, int, int]], expected: tuple[float | None, int]
+) -> None:
+    depth, actions = heatmap_depth(cells, 16)
+    assert actions == expected[1]
+    assert depth == (None if expected[0] is None else pytest.approx(expected[0]))
+
+
+@pytest.mark.parametrize(
+    ("player", "depth", "actions"),
+    [  # worked out from tests/fixtures/pitchapi/match_heatmaps.json
+        ("p_FXGK01", 1.5 / 16, 10),
+        ("p_FXLB01", 5.0 / 16, 8),
+        ("p_FXST01", 13.5 / 16, 8),
+        ("p_FXSB01", 8.5 / 16, 3),  # a sub gets a depth too
+        ("p_FXGK02", 1.5 / 16, 9),
+        ("p_FXAM01", 11.0 / 16, 10),
+        ("p_FXGK03", None, 0),  # on the heatmap with no actions
+    ],
+)
+def test_depth_per_appearance(
+    match_db: Engine, normalize: Normalize, player: str, depth: float | None, actions: int
+) -> None:
+    summary = normalize()
+    assert summary.heatmaps_status == "ok" and summary.missing_heatmap_rows == []
+    stored = appearance(match_db, player)
+    assert stored.depth == (None if depth is None else pytest.approx(depth))
+    assert stored.depth_actions == actions
+
+
+def heatmaps_status(engine: Engine) -> str:
+    with Session(engine) as session:
+        return find_match(session, MATCH).heatmaps_status
+
+
+def test_heatmaps_never_fetched_stay_pending(match_db: Engine, normalize: Normalize) -> None:
+    summary = normalize(heatmaps=None)  # an offline run before any online sync
+    assert summary.heatmaps_status == heatmaps_status(match_db) == "pending"
+    assert appearance(match_db, "p_FXLB01").depth is None
+    assert summary.appearances.inserted == 7  # everything else is synced as usual
+
+
+def test_heatmaps_404_is_missing(match_db: Engine, normalize: Normalize) -> None:
+    summary = normalize(heatmaps=record("heatmaps", None, error="RESOURCE_NOT_FOUND"))
+    assert summary.heatmaps_status == heatmaps_status(match_db) == "missing"
+    stored = appearance(match_db, "p_FXLB01")
+    assert (stored.depth, stored.depth_actions) == (None, None)
+
+
+def test_player_missing_from_heatmaps_is_reported(
+    match_db: Engine, normalize: Normalize, load_fixture: Any
+) -> None:
+    heatmaps = load_fixture("match_heatmaps.json")
+    heatmaps["players"] = [r for r in heatmaps["players"] if r["player"]["id"] != "p_FXSB01"]
+    summary = normalize(heatmaps=heatmaps)
+    assert summary.heatmaps_status == "ok"
+    assert summary.missing_heatmap_rows == ["Dev Sub"]
+    stored = appearance(match_db, "p_FXSB01")
+    assert (stored.depth, stored.depth_actions) == (None, None)
+
+
+def test_heatmaps_arriving_later_fill_in_depth(match_db: Engine, normalize: Normalize) -> None:
+    normalize(heatmaps=None)
+    summary = normalize()  # the online sync that fetched them
+    assert summary.heatmaps_status == "ok"
+    assert summary.appearances.updated == 7  # every appearance gained a depth
+    assert appearance(match_db, "p_FXST01").depth == pytest.approx(13.5 / 16)
+
+
+def test_heatmaps_for_another_match_raise(
+    match_db: Engine, normalize: Normalize, load_fixture: Any
+) -> None:
+    heatmaps = load_fixture("match_heatmaps.json")
+    heatmaps["match_id"] = "m_FIXT02"
+    with pytest.raises(SyncError, match="heatmaps are for m_FIXT02"):
+        normalize(heatmaps=heatmaps)
+
+
+def test_heatmaps_in_another_frame_raise(
+    match_db: Engine, normalize: Normalize, load_fixture: Any
+) -> None:
+    heatmaps = load_fixture("match_heatmaps.json")
+    heatmaps["grid"]["frame"] = "home_ltr"
+    with pytest.raises(SyncError, match="unexpected response shape"):
+        normalize(heatmaps=heatmaps)
+
+
+def test_newest_fetch_time_includes_heatmaps(match_db: Engine, normalize: Normalize) -> None:
+    later = T0 + timedelta(days=2)
+    normalize(heatmaps=record("heatmaps", None, error="RESOURCE_NOT_FOUND", at=later))
+    with Session(match_db) as session:
+        assert find_match(session, MATCH).normalized_at == later.replace(tzinfo=None)
 
 
 # --- idempotency --------------------------------------------------------------------------------
