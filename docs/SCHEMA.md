@@ -1,8 +1,8 @@
 # SCHEMA.md: Canonical data model (v1.1, approved)
 
-**Status:** APPROVED 2026-11-19 (D-011), with the answers to §11 folded in. Approving it closed Phase 0. Further changes go through DECISIONS.md (latest: D-018, slice 2d-3).
+**Status:** APPROVED 2026-11-19 (D-011), with the answers to §11 folded in. Approving it closed Phase 0. Further changes go through DECISIONS.md (latest: D-019, slice 2e; Phase 2 done).
 **Based on:** the spike findings in [PITCHAPI_NOTES.md](PITCHAPI_NOTES.md) and decisions D-001 to D-010.
-**Not code.** Phase 1 turns §5 into SQLAlchemy models and Alembic migrations; §6–§8 are built in Phases 2 and 6–7.
+**Not code.** §5–§7 are built (Phases 1–2); §8 is Phases 6–7.
 
 ## 1. What the model has to guarantee
 
@@ -25,7 +25,8 @@ PitchAPI ─► PitchApiClient ─► raw.db (raw_response) ─► parsers (Pyda
                      scouting.db: competition / season / team / player / match / appearance / stat_value
                                                             │ rebuild after each sync
                                                             ▼
-                     aggregates: player_scope* (incl. the 6/8 split), player_scope_stat ─► peer_group / percentile ─► API ─► UI
+                     aggregates: player_scope* (incl. the 6/8 split), player_scope_stat (incl. derived volume metrics)
+                                 ─► peer_group / percentile ─► position templates (TOML) ─► API ─► UI
 
 FM24 .rtf ─► header detection + mapping file ─► fm_import snapshot ─► same aggregate tables (its own scope)
 ```
@@ -36,6 +37,8 @@ FM24 .rtf ─► header detection + mapping file ─► fm_import snapshot ─�
 |---|---|---|
 | `raw.db` | `raw_response` only: every API response, gzip-compressed | Large (≈ 1,520 responses per league-season since heatmaps) and only the sync CLI needs it. It can be deleted and re-crawled, backed up separately, and never ships to a hosted site |
 | `scouting.db` | Everything else | Small enough to host. It can be rebuilt from `raw.db` |
+
+User-made content (custom templates, Phases 3–4) will live in a third file, `user.db`, because `scouting.db` is designed to be deleted and rebuilt (D-019).
 
 ## 4. Identity
 
@@ -119,12 +122,15 @@ stat_value     appearance_id FK, metric_id FK,
                PRIMARY KEY(appearance_id, metric_id)   -- WITHOUT ROWID
 ```
 
-- **The registry's source of truth is a typed Python module** (`scouting.metrics.registry`), checked by mypy and tests. The `metric` table is synced from it on each run, so metric IDs stay stable.
+- **The registry's source of truth is a typed Python module** (`scouting.metrics.registry`), checked by mypy and tests. The `metric` table is synced from it on each run, so metric IDs stay stable. **100 metrics: 95 ingested + 5 derived** (D-019). New metrics are appended so existing IDs never move.
+- **Registry-only fields (not columns):** `outcome` (needs a goal or a penalty: goals, assists, gca, second_assists, big_chances_missed, goals_conceded, errors_led_to_goal, own_goals, penalties_missed, penalties_saved; kept off templates) and `volume_of` (a derived volume metric's success-rate parent). The API reads them from the registry, so they needed no migration.
+- **Derived volume metrics** (slice 2e, D-019): `passes_completed_count`, `crosses_completed_count`, `dribbles_completed_count`, `long_balls_completed_count`, `aerials_won_count`. Each is a `count` metric with its parent's `source`, `source_key` and `applies_to`; the match sync skips them (no `stat_value` rows); aggregation copies the parent's season row (successes, exposure minutes, per 90) so they're ranked per 90 next to the parent's success rate.
 - **Only registry metrics get ingested.** Fantasy points, the shotmap flag and other noise are dropped at parse time, but they stay in `raw.db`.
 - **`applies_to`** (added in slice 1c): a metric that doesn't describe a player gets **no row**, not a 0. A striker has no `saves` row, and a keeper has no `shots` row. A player counts as a goalkeeper if he started in slot 11 or came on as a sub with category 0. Without lineup data, keeper-only stats like `saves` decide it.
 - **`absence_policy`** values are `zero`, `null` and `fraction_zero_attempts`. "Not rated" applies only to `appearance.rating`, which isn't a registry metric.
 - **Two-field fractions** (slice 1d): the advanced endpoint sends some fractions as two counts (e.g. `carrying.take_ons_won` of `carrying.take_ons`). `source_key` is the successes and `denominator_key` the attempts. If the attempts field is missing, the absence policy applies.
 - **Per-match rates** (`value_is_rate`, slice 1d): the keeper rates (`distribution_accuracy`, `launch_pct`, `claim_rate`, `avg_pass_length`) are stored as `value = rate × weight`, `denominator = weight` (distributions or claims), on the scale PitchAPI sends (percentages stay 0–100). A season then gets the exact weighted average through `rate_from_sums`. A weight of 0 stores (0, 0); a NULL rate with a non-zero weight stores (NULL, NULL). These are never per-90'd. (`launch_pct` and `claim_rate` turned out to be their counts' ratios, rounded to 0.1: D-016.)
+- **What some metrics contain (checked):** `xgot` includes penalties; `defensive_actions` equals tackles + interceptions + clearances + shot blocks + recoveries in 68% of matches and is about 1 lower otherwise (D-019).
 - **A whole missing group** (e.g. `goalkeeping` is null for a substitute keeper) gives **no rows** for that group's metrics, not zeros.
 - **No `stat_value` row** therefore means one of two things: the metric doesn't apply to the player, or its source had no data for the match (e.g. `ANALYTICS_UNAVAILABLE`). Either way, those minutes don't count as exposure for that metric.
 
@@ -154,7 +160,7 @@ Per-match progress comes from `raw_response` plus the `match.*_status` columns, 
 - Then it fetches profiles for the season's players (skipped after Ctrl-C), committing every 25 players with progress output. A Ctrl-C there keeps the finished chunks; a profile with an unexpected shape is reported and skipped.
 - `last_full_sync_at` = the latest `match.normalized_at` once nothing is pending. `normalized_at` is the newest `fetched_at` among the responses used (heatmaps included). Deterministic, like every other timestamp.
 - **Profiles are the authority** for `name`, `short_name`, `country_code`, `shirt_number` and `listed_slot_code`; the per-match payloads only create the player.
-- `scouting report checksum` hashes every canonical table (sorted rows), so "two runs give an identical DB" is checked with one command. `scouting report formations` lists every formation in a season and any starter slot without a role.
+- `scouting report checksum` hashes every canonical table (sorted rows), so "two runs give an identical DB" is checked with one command (passed again at the end of Phase 2, D-019). `scouting report formations` lists every formation in a season and any starter slot without a role.
 
 ### Search
 
@@ -162,7 +168,7 @@ Per-match progress comes from `raw_response` plus the `match.*_status` columns, 
 player_fts     FTS5 virtual table over (search_name, short_name), content='player'
 ```
 
-Derived and rebuilt after each sync. rapidfuzz then re-ranks the FTS candidates, which handles typos and forms like "E. Haaland".
+Derived and rebuilt after each sync (Phase 3). rapidfuzz then re-ranks the FTS candidates, which handles typos and forms like "E. Haaland". **Until then** the CLI looks players up by PitchAPI ID or a name fragment (accents ignored on `search_name`), and a player whose full name or short name equals the query wins outright (D-019); accented short names need the accent.
 
 ### Raw cache (`raw.db`)
 
@@ -176,7 +182,7 @@ raw_response   cache_key PK (method + path + sorted query params), path, params_
 - **Freshness is worked out when a response is read:** `fetched_at` plus the current `FreshnessPolicy` for that endpoint class. There's no stored `expires_at`/`recheck_at` (changed in slice 1a, 2026-11-19), so changing a TTL also applies to responses already stored. For example, a match list fetched while its season was current stops being refetched once the season is complete. Heatmaps use the finished-match policy (never refetched; a 404 is re-checked weekly).
 - **Managed with stdlib `sqlite3`, not Alembic.** It's one table. The schema version lives in `PRAGMA user_version`, and opening a file with a different version fails.
 
-## 6. Aggregates (Phase 2; built in slices 2a, 2b and 2d-3)
+## 6. Aggregates (Phase 2; built in slices 2a, 2b, 2d-3 and 2e)
 
 Aggregates are keyed on a **scope**, so real seasons and FM snapshots share one shape. That's what lets the comparison and chart code serve both modes unchanged.
 
@@ -215,10 +221,13 @@ percentile         peer_group_id, player_id, metric_id, basis ('per90'|'rate'),
 
 **The 2d-3 migration** dropped and recreated `percentile`, `peer_group` and `player_scope` (adding DM to the `peer_role` CHECKs rebuilds a table on SQLite, which fails while it's referenced; as derived tables they're refilled by `scouting aggregate`). The downgrade restores the 7-role CHECK and drops the five columns the same way.
 
+**EPL 2025/26 at the end of Phase 2:** 537 players, 42,051 season stat rows, peer groups GK 25 · CB 67 · FB 62 · DM 28 · CM 48 · AM 17 · W 65 · ST 33, 26,693 percentiles.
+
 ### Aggregation rules
 
 - **Exposure minutes are counted per metric:** the minutes of the appearances that have a `stat_value` row for it. If a match was `ANALYTICS_UNAVAILABLE`, its minutes don't count toward advanced metrics. Otherwise unrated matches would quietly push down xT/VAEP per 90.
 - **A stored NULL** follows the registry's `season_null` (slice 2a, D-014): `skip` = unknown, adds neither total nor minutes (the default); `zero` = a known zero, adds 0 and its minutes (`xgot`: NULL means no shot on target; `was_fouled`: PitchAPI sends NULL, never 0, for a player who wasn't fouled, D-016).
+- **Derived volume metrics** (slice 2e): after the season rows are built, each volume metric gets a copy of its parent's row (total = successes, same exposure minutes and matches, per 90; no denominator or rate).
 - **Primary role** (slice 2a): most minutes as a starter (ties: more starts, then role order). No starts: the profile's listed slot, only where every mapped formation agrees on it (`role_source = 'listed'`; e.g. 11 → GK, but 84 → none because it's W, AM or CM depending on the formation).
 - **The 6/8 split (slice 2d-3, D-018):** every player whose formation peer role is DM or CM (any minutes, so a player added to a comparison by hand has a group too) is re-decided before percentiles:
   - **≥ 5 central-mid starts with a heatmap → depth decides:** season depth = minutes-weighted mean, over his DM/CM-role starts, of his depth minus the mean depth of his team's starting centre-backs. **≥ 14 m (0.1333) → CM (8)**; below → **DM (6)**, unless his deepest fellow starting central mid played on average **≥ 2 m deeper** over **≥ 5 starts** beside one → **CM, method `partner`**.
@@ -229,10 +238,17 @@ percentile         peer_group_id, player_id, metric_id, basis ('per90'|'rate'),
 - **Fractions:** `rate = SUM(value) / SUM(denominator)`, NULL when the denominator is 0. **Never average per-match percentages.**
 - **Rating:** `avg_rating` is the simple mean over rated matches, and `rated_matches` is always shown next to it. It's never per-90'd, and unrated matches are excluded rather than counted as 0. Low priority: it's stored and shown on the player card, but it isn't part of any default radar template.
 - **Percentiles** are computed within an explicit peer group: same scope (competition-season), same `peer_role`, `minutes ≥ min_minutes`. The UI always shows the group and its size. FM percentiles are computed only within their own import's population.
-- **Percentile formula (D-014):** midpoint, pct = (below + ½ × tied) ÷ n × 100, on per-90 for counts, model outputs and distances and on rate for fractions. Stored raw (low value = low percentile); the UI flips lower-is-better metrics. Eligibility is per metric: per-90 metrics need the minimum minutes on that metric's own exposure, and fraction metrics need `metric.min_attempts`; an ineligible player has no `percentile` row for that metric (the UI derives the reason from `player_scope_stat`). `ranked_among` records how many were ranked. Groups under 20 players get a small-sample warning. A player outside the group (added by hand) is ranked on the fly against the stored values without joining it (`rank_against`).
+- **Percentile formula (D-014):** midpoint, pct = (below + ½ × tied) ÷ n × 100, on per-90 for counts (including the derived volume metrics), model outputs and distances and on rate for fractions. Stored raw (low value = low percentile); the UI flips lower-is-better metrics. Eligibility is per metric: per-90 metrics need the minimum minutes on that metric's own exposure, and fraction metrics need `metric.min_attempts` (passes 100 since D-019); an ineligible player has no `percentile` row for that metric (the UI derives the reason from `player_scope_stat`). `ranked_among` records how many were ranked. Groups under 20 players get a small-sample warning. A player outside the group (added by hand) is ranked on the fly against the stored values without joining it (`rank_against`).
 - **Minimum minutes:** the default is 25% of the scope's possible minutes (≈ 855 for a 38-match season), scaled to matches played for a season in progress, and **adjustable in the UI**. A non-default threshold is computed on the fly from `player_scope_stat`; only the default is stored in `percentile`.
 - **Players added manually:** you can add any player to a comparison, even one below the threshold or from another peer role. That player is ranked against the chosen peer group's distribution but **isn't added to it**, so the other players' percentiles don't change. The UI flags them ("below minimum minutes" / "outside peer group") and shows their minutes.
 - **When aggregates run:** they're rebuilt for each affected scope after a sync, so the UI never scans `stat_value`.
+
+### Position templates (slice 2e, D-015, D-019)
+
+- **File:** `backend/src/scouting/mappings/position_templates.toml`, one template per peer role: a label and sections of metric codes (GK 8 metrics, the rest 12). Not a table: templates only select stored values, so applying one computes nothing.
+- **Shape** (`scouting.metrics.templates.Template`): id (`builtin:ROLE`), peer role, label, sections, `builtin`. User-made templates will share the shape and live in `user.db` (Phases 3–4).
+- **Checks** return findings with a severity. Errors: unknown metric, metric that doesn't apply to the position (`applies_to`), duplicate, empty section, unknown role. Errors for built-ins, warnings for custom templates: an outcome metric, both halves of a near-duplicate pair (xa/xag, key_passes/chances_created, dribbles_completed/take_ons_completed, claims_won/claim_rate), size outside 8–14. With a season: a warning when fewer than half the group is ranked on a metric.
+- **Applying** a template to a player-season gives rows per section: value, percentile and group size, model flag, direction, and the reason when there's no percentile ("needs 100 attempts (has 18)", "not ranked: below 855 min", "no data"). A template for another position than the player's group is flagged: his percentiles are still against his own group.
 
 ## 7. Positions: from formation + slot to role
 
@@ -295,12 +311,12 @@ metric_mapping fm_metric_id, real_metric_id, comparability ('direct'|'approximat
 player_link    fm_player_id, real_player_id, method ('manual'|'name_dob'|'name_team'), confidence, created_at
 ```
 
-Each import is a snapshot, so tracking a player over time means comparing scopes. Nothing here depends on the FM format beyond "a table of columns". The real header mapping waits for a real `.rtf` file (D-006). FM scopes have no heatmaps, so the 6/8 split for FM players will need its own rule (FM's position/role), decided in Phase 6.
+Each import is a snapshot, so tracking a player over time means comparing scopes. Nothing here depends on the FM format beyond "a table of columns". The real header mapping waits for a real `.rtf` file (D-006) and will be a TOML file like the templates (D-019). FM scopes have no heatmaps, so the 6/8 split for FM players will need its own rule (FM's position/role), decided in Phase 6.
 
 ## 9. Normalization and idempotency
 
 - **Upserts go through natural keys:** the source-ID maps, `appearance UNIQUE(match_id, player_id)` and `stat_value`'s primary key.
-- **Normalizing one match is a single transaction.** It upserts the match, upserts its appearances (depth included), then deletes and re-inserts their `stat_value` rows. That's simpler than diffing, and re-running it gives identical rows.
+- **Normalizing one match is a single transaction.** It upserts the match, upserts its appearances (depth included), then deletes and re-inserts their `stat_value` rows for the ingested metrics (never the derived volume metrics). That's simpler than diffing, and re-running it gives identical rows.
 - **Absence policy is applied here, from the registry** (PITCHAPI_NOTES, "What a missing key or null means"):
   - `zero` → store 0
   - `null` → store NULL
@@ -315,8 +331,8 @@ Each import is a snapshot, so tracking a player over time means comparing scopes
 
 ## 10. Rough size
 
-- **Per season:** an EPL season is about 380 matches × ~31 appearances ≈ 11.8k appearances. At about 80 registry metrics (90 defined after slice 1d; a player gets only the ones that apply) that's ≈ 0.95M `stat_value` rows, roughly 25 MB with `WITHOUT ROWID` and integer metric IDs.
-- **Top 5 × 6 seasons:** ≈ 28M rows, about 0.7 GB. That's fine for SQLite. The UI only reads aggregates, which are smaller by a factor of ~30 per season.
+- **Per season:** an EPL season is about 380 matches × ~31 appearances ≈ 11.8k appearances, and 849,359 `stat_value` rows (95 ingested metrics; a player gets only the ones that apply), roughly 25 MB with `WITHOUT ROWID` and integer metric IDs.
+- **Top 5 × 6 seasons:** ≈ 28M rows, about 0.7 GB. That's fine for SQLite. The UI only reads aggregates, which are smaller by a factor of ~20 per season (42,051 season stat rows for EPL 2025/26).
 - **`raw.db`:** about 1,520 responses per league-season, gzip-compressed (heatmaps add 380).
 
 ## 11. Resolved questions (2026-11-19, D-011)
@@ -341,4 +357,4 @@ Each import is a snapshot, so tracking a player over time means comparing scopes
   - (`raw.db`'s `raw_response` is created by `RawStore`, not Alembic; done in slice 1a)
 - **Code:** the cache layer over `PitchApiClient`, Pydantic parsers for the 5 endpoints, the registry (an initial metric list), the normalizer, and the `sync` CLI command.
 - **Exit test:** two full EPL 2025/26 syncs produce an identical `scouting.db`, and a sync killed halfway resumes correctly.
-- §6 (aggregates and percentiles) is Phase 2. §8 (FM) is Phases 6–7.
+- §6 (aggregates and percentiles) is Phase 2 (done). §8 (FM) is Phases 6–7.
