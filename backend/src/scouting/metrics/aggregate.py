@@ -13,6 +13,8 @@ Rules:
   fractions (the exact weighted average for value_is_rate metrics). NULL when undefined.
 - Primary role: most minutes as a starter (ties: more starts, then ROLES order). With no
   starts, the profile's listed slot where every formation agrees on it (positions.py).
+- Volume metrics (e.g. successful dribbles) are copied from their success-rate parent's
+  season row: same successes and exposure minutes, ranked per 90 (slice 2e).
 - Central midfielders (peer role DM or CM by formation) are then re-split into 6s and 8s by
   heatmap depth, or by formation with too few starts (metrics/depth.py, D-018), whatever
   their minutes, so a player added to a comparison by hand has a group too.
@@ -50,7 +52,7 @@ from scouting.domain.positions import (
 )
 from scouting.metrics.depth import classify_central_mids, load_rows
 from scouting.metrics.percentiles import PercentileSummary, build_percentiles
-from scouting.metrics.registry import REGISTRY
+from scouting.metrics.registry import REGISTRY, VOLUMES
 
 MINUTES_PER_MATCH: Final = 90
 DEFAULT_MIN_MINUTES_SHARE: Final = 0.25  # D-011: 25% of the possible minutes
@@ -242,10 +244,44 @@ def aggregate_season(session: Session, season_id: int) -> AggregateSummary:
         _STAT_ROWS, {"scope_id": scope.id, "season_id": season_id, "zero_ids": zero_ids}
     )
     assert isinstance(result, CursorResult)  # an INSERT always gives a cursor result
-    summary.stat_rows = result.rowcount
+    summary.stat_rows = result.rowcount + _derive_volumes(session, scope.id)
     summary.min_minutes = min_minutes
     summary.percentiles = build_percentiles(session, scope.id, min_minutes, computed_at)
     return summary
+
+
+# A volume metric's season row is its parent's successes (total, exposure minutes, per 90),
+# without the attempts or the rate (slice 2e, decision A).
+_VOLUME_ROWS = text(
+    """
+    INSERT INTO player_scope_stat
+        (player_id, scope_id, metric_id, total, denominator, minutes,
+         matches_with_value, per90, rate)
+    SELECT player_id, scope_id, :volume_id, total, NULL, minutes, matches_with_value,
+           per90, NULL
+    FROM player_scope_stat
+    WHERE scope_id = :scope_id AND metric_id = :parent_id
+    """
+)
+
+
+def _derive_volumes(session: Session, scope_id: int) -> int:
+    """Season rows for every volume metric, from its parent's; returns rows written."""
+    ids = {code: metric_id for code, metric_id in session.execute(select(Metric.code, Metric.id))}
+    written = 0
+    for volume in VOLUMES:
+        assert volume.volume_of is not None  # VOLUMES holds only derived metrics
+        result = session.execute(
+            _VOLUME_ROWS,
+            {
+                "scope_id": scope_id,
+                "volume_id": ids[volume.code],
+                "parent_id": ids[volume.volume_of],
+            },
+        )
+        assert isinstance(result, CursorResult)
+        written += result.rowcount
+    return written
 
 
 def _split_central_mids(session: Session, season_id: int, scope_rows: list[PlayerScope]) -> None:

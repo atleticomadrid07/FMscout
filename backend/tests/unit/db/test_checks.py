@@ -14,7 +14,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, select, text, update
 from sqlalchemy.orm import Session
 
 from scouting.db.checks import (
@@ -22,11 +22,13 @@ from scouting.db.checks import (
     SLOT_SPECS,
     CheckError,
     SlotSpec,
+    check_defensive_actions,
     check_rate,
     check_slots,
     check_was_fouled,
     check_xa_definition,
     check_xa_xag,
+    check_xgot_penalties,
 )
 from scouting.db.models import Appearance, MatchSourceId, Metric, PlayerSourceId, StatValue
 from scouting.ingest.season import find_season
@@ -311,3 +313,49 @@ def test_xa_definition_sees_xag_without_chances(synced_season: Engine) -> None:
     assert {r.count_code: r.xag_positive for r in check.no_chance} == {
         "chances_created": 1, "key_passes": 1,
     }  # fmt: skip
+
+
+# --- slice 2e: xGOT and penalties, defensive_actions' composition ------------------------------
+
+
+def one_shot_goal(engine: Engine, player: str, *, penalty: bool, xgot: float | None) -> None:
+    """Make the player's m_FIXT01 appearance a single scored shot."""
+    set_value(engine, player, "m_FIXT01", "shots", 1)
+    set_value(engine, player, "m_FIXT01", "goals", 1)
+    set_value(engine, player, "m_FIXT01", "xg", 0.76 if penalty else 0.3)
+    set_value(engine, player, "m_FIXT01", "npxg", 0 if penalty else 0.3)
+    set_value(engine, player, "m_FIXT01", "xgot", xgot)
+
+
+def test_xgot_penalties(synced_season: Engine) -> None:
+    with Session(synced_season) as session:
+        before = check_xgot_penalties(session, season_id(session))
+    one_shot_goal(synced_season, "p_AST01", penalty=True, xgot=0.9)
+    one_shot_goal(synced_season, "p_BAM01", penalty=True, xgot=None)  # stored NULL: not counted
+    one_shot_goal(synced_season, "p_ASB01", penalty=False, xgot=0.5)
+    with Session(synced_season) as session:
+        check = check_xgot_penalties(session, season_id(session))
+    assert check.penalty.rows == before.penalty.rows + 2
+    assert check.penalty.xgot_positive == before.penalty.xgot_positive + 1
+    assert check.open_play.rows == before.open_play.rows + 1
+    assert check.open_play.xgot_positive == before.open_play.xgot_positive + 1
+
+
+def test_defensive_actions_composition(synced_season: Engine) -> None:
+    # Every outfield appearance: tackles 1, interceptions 2, defensive_actions 3.
+    with synced_season.begin() as connection:
+        for code, value in (("tackles", 1), ("interceptions", 2), ("defensive_actions", 3)):
+            connection.execute(
+                text(
+                    "UPDATE stat_value SET value = :value WHERE metric_id = "
+                    "(SELECT id FROM metric WHERE code = :code) AND appearance_id IN "
+                    "(SELECT id FROM appearance WHERE NOT is_goalkeeper)"
+                ),
+                {"value": value, "code": code},
+            )
+    with Session(synced_season) as session:
+        check = check_defensive_actions(session, season_id(session))
+    assert check.rows > 0
+    best = check.best[0]
+    assert best.components == ("tackles", "interceptions")
+    assert best.exact == check.rows and best.mean_gap == 0

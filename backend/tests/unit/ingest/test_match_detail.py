@@ -40,20 +40,20 @@ from scouting.ingest.match_detail import (
     normalize_match,
 )
 from scouting.ingest.match_list import SyncError, normalize_match_list
-from scouting.metrics.registry import REGISTRY
+from scouting.metrics.registry import INGESTED, REGISTRY
 
 T0 = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 MATCH = "m_FIXT01"
-OUTFIELD_METRICS = sum(1 for m in REGISTRY if m.applies_to != "gk")
-GK_METRICS = sum(1 for m in REGISTRY if m.applies_to != "outfield")
+OUTFIELD_METRICS = sum(1 for m in INGESTED if m.applies_to != "gk")
+GK_METRICS = sum(1 for m in INGESTED if m.applies_to != "outfield")
 ADVANCED_OUTFIELD = sum(
-    1 for m in REGISTRY if m.source == "pitchapi_advanced" and m.applies_to != "gk"
+    1 for m in INGESTED if m.source == "pitchapi_advanced" and m.applies_to != "gk"
 )
 ADVANCED_GK = sum(
-    1 for m in REGISTRY if m.source == "pitchapi_advanced" and m.applies_to != "outfield"
+    1 for m in INGESTED if m.source == "pitchapi_advanced" and m.applies_to != "outfield"
 )
 # Metrics read from the advanced `goalkeeping` group, which is null for sub keepers (Hal).
-GOALKEEPING_GROUP = sum(1 for m in REGISTRY if m.source_key.startswith("goalkeeping."))
+GOALKEEPING_GROUP = sum(1 for m in INGESTED if m.source_key.startswith("goalkeeping."))
 SUB_KEEPER_METRICS = GK_METRICS - GOALKEEPING_GROUP
 
 

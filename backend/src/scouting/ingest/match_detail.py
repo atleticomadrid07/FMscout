@@ -55,11 +55,11 @@ from scouting.domain.names import search_name
 from scouting.domain.positions import GK_SLOT, SUB_CATEGORY_GK, role_for
 from scouting.ingest.match_list import SOURCE, SyncError, UpsertCounts
 from scouting.ingest.reference_data import sync_reference_data
-from scouting.metrics.registry import KEEPER_ONLY_KEYS, KNOWN_PLAYER_KEYS, REGISTRY, MetricDef
+from scouting.metrics.registry import INGESTED, KEEPER_ONLY_KEYS, KNOWN_PLAYER_KEYS, MetricDef
 
 logger = logging.getLogger(__name__)
 
-PLAYERS_SOURCE_KEYS = frozenset(m.source_key for m in REGISTRY if m.source == "pitchapi_players")
+PLAYERS_SOURCE_KEYS = frozenset(m.source_key for m in INGESTED if m.source == "pitchapi_players")
 
 
 @dataclass(slots=True)
@@ -373,7 +373,7 @@ def normalize_match(
                     changed = True
             summary.appearances.add("updated" if changed else "unchanged")
 
-        for metric in REGISTRY:
+        for metric in INGESTED:  # volume metrics are derived at aggregation, not stored
             if not _applies(metric, is_goalkeeper):
                 continue
             if metric.source == "pitchapi_players":

@@ -151,9 +151,18 @@ class PlayerMatch:
 
 def find_players(session: Session, scope_id: int, query: str) -> list[PlayerMatch]:
     """Players in a scope matching a PitchAPI ID exactly, or a name fragment (accents and
-    case ignored), most minutes first. Real search (FTS + fuzzy) comes in Phase 3."""
+    case ignored), most minutes first. A player whose whole name or short name is the query
+    wins outright ("rodri" finds Rodri, not Bentancur too). Real search (FTS + fuzzy) comes
+    in Phase 3."""
     stmt = (
-        select(Player.id, PlayerSourceId.external_id, Player.name, PlayerScope.minutes)
+        select(
+            Player.id,
+            PlayerSourceId.external_id,
+            Player.name,
+            PlayerScope.minutes,
+            Player.search_name,
+            Player.short_name,
+        )
         .join(PlayerSourceId, PlayerSourceId.player_id == Player.id)
         .join(PlayerScope, PlayerScope.player_id == Player.id)
         .where(PlayerSourceId.source == SOURCE, PlayerScope.scope_id == scope_id)
@@ -167,7 +176,14 @@ def find_players(session: Session, scope_id: int, query: str) -> list[PlayerMatc
             Player.search_name.contains(fragment, autoescape=True)
             | func.lower(Player.short_name).contains(fragment, autoescape=True)
         )
-    return [PlayerMatch(*row) for row in session.execute(stmt)]
+    rows = list(session.execute(stmt))
+    if not query.startswith("p_"):
+        wanted = search_name(query)
+        exact = [
+            r for r in rows if wanted in (r[4], search_name(r[5]) if r[5] is not None else None)
+        ]
+        rows = exact or rows
+    return [PlayerMatch(r[0], r[1], r[2], r[3]) for r in rows]
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,6 @@
 # SCHEMA.md: Canonical data model (v1.1, approved)
 
-**Status:** APPROVED 2026-11-19 (D-011), with the answers to §11 folded in. Approving it closed Phase 0. Further changes go through DECISIONS.md (latest: D-017, slice 2d).
+**Status:** APPROVED 2026-11-19 (D-011), with the answers to §11 folded in. Approving it closed Phase 0. Further changes go through DECISIONS.md (latest: D-018, slice 2d-3).
 **Based on:** the spike findings in [PITCHAPI_NOTES.md](PITCHAPI_NOTES.md) and decisions D-001 to D-010.
 **Not code.** Phase 1 turns §5 into SQLAlchemy models and Alembic migrations; §6–§8 are built in Phases 2 and 6–7.
 
@@ -25,7 +25,7 @@ PitchAPI ─► PitchApiClient ─► raw.db (raw_response) ─► parsers (Pyda
                      scouting.db: competition / season / team / player / match / appearance / stat_value
                                                             │ rebuild after each sync
                                                             ▼
-                     aggregates: player_scope*, player_scope_stat ─► peer_group / percentile ─► API ─► UI
+                     aggregates: player_scope* (incl. the 6/8 split), player_scope_stat ─► peer_group / percentile ─► API ─► UI
 
 FM24 .rtf ─► header detection + mapping file ─► fm_import snapshot ─► same aggregate tables (its own scope)
 ```
@@ -176,7 +176,7 @@ raw_response   cache_key PK (method + path + sorted query params), path, params_
 - **Freshness is worked out when a response is read:** `fetched_at` plus the current `FreshnessPolicy` for that endpoint class. There's no stored `expires_at`/`recheck_at` (changed in slice 1a, 2026-11-19), so changing a TTL also applies to responses already stored. For example, a match list fetched while its season was current stops being refetched once the season is complete. Heatmaps use the finished-match policy (never refetched; a 404 is re-checked weekly).
 - **Managed with stdlib `sqlite3`, not Alembic.** It's one table. The schema version lives in `PRAGMA user_version`, and opening a file with a different version fails.
 
-## 6. Aggregates (Phase 2; built in slices 2a and 2b)
+## 6. Aggregates (Phase 2; built in slices 2a, 2b and 2d-3)
 
 Aggregates are keyed on a **scope**, so real seasons and FM snapshots share one shape. That's what lets the comparison and chart code serve both modes unchanged.
 
@@ -186,9 +186,15 @@ scope              id PK, kind ('season'|'fm_import'),
                    CHECK (exactly one of season_id / fm_import_id is set)
 
 player_scope       player_id, scope_id, minutes, matches, starts,
-                   primary_role (nullable), peer_role (nullable),
+                   primary_role (nullable), peer_role (nullable; GK CB FB DM CM AM W ST),
                    role_source ('starts'|'listed', nullable),   -- slice 2a
                    avg_rating (nullable), rated_matches, computed_at,
+                   -- slice 2d-3 (D-018), central mids only, NULL for everyone else:
+                   peer_method ('depth'|'partner'|'formation', nullable),
+                   depth (nullable),           -- share of pitch length in front of his CBs (× 105 = m)
+                   depth_starts (nullable),    -- central-mid starts with a heatmap behind depth
+                   partner_gap (nullable),     -- + = his deepest fellow central mid played deeper
+                   partner_starts (nullable),  -- starts beside another central mid
                    PRIMARY KEY(player_id, scope_id)
 player_scope_team  player_id, scope_id, team_id, minutes        -- mid-season moves inside one competition
 player_scope_role  player_id, scope_id, role, minutes           -- shows how primary_role was chosen
@@ -207,13 +213,17 @@ percentile         peer_group_id, player_id, metric_id, basis ('per90'|'rate'),
                    PRIMARY KEY(peer_group_id, player_id, metric_id)   -- WITHOUT ROWID
 ```
 
-**Coming in slice 2d-3 (D-017):** `peer_role` gains `DM` (6s split from 8s). Central midfielders' peer role comes from a season classification: team-relative depth over their central-midfield starts with heatmaps (at least 5), else a formation fallback; the method is recorded per player. The reference point and the cut are set at 2d-2 from season data. Changing the `peer_role` CHECK constraints rebuilds `player_scope` and `peer_group` on SQLite; as derived tables they're dropped and recreated, then refilled by `scouting aggregate`.
+**The 2d-3 migration** dropped and recreated `percentile`, `peer_group` and `player_scope` (adding DM to the `peer_role` CHECKs rebuilds a table on SQLite, which fails while it's referenced; as derived tables they're refilled by `scouting aggregate`). The downgrade restores the 7-role CHECK and drops the five columns the same way.
 
 ### Aggregation rules
 
 - **Exposure minutes are counted per metric:** the minutes of the appearances that have a `stat_value` row for it. If a match was `ANALYTICS_UNAVAILABLE`, its minutes don't count toward advanced metrics. Otherwise unrated matches would quietly push down xT/VAEP per 90.
 - **A stored NULL** follows the registry's `season_null` (slice 2a, D-014): `skip` = unknown, adds neither total nor minutes (the default); `zero` = a known zero, adds 0 and its minutes (`xgot`: NULL means no shot on target; `was_fouled`: PitchAPI sends NULL, never 0, for a player who wasn't fouled, D-016).
 - **Primary role** (slice 2a): most minutes as a starter (ties: more starts, then role order). No starts: the profile's listed slot, only where every mapped formation agrees on it (`role_source = 'listed'`; e.g. 11 → GK, but 84 → none because it's W, AM or CM depending on the formation).
+- **The 6/8 split (slice 2d-3, D-018):** every player whose formation peer role is DM or CM (any minutes, so a player added to a comparison by hand has a group too) is re-decided before percentiles:
+  - **≥ 5 central-mid starts with a heatmap → depth decides:** season depth = minutes-weighted mean, over his DM/CM-role starts, of his depth minus the mean depth of his team's starting centre-backs. **≥ 14 m (0.1333) → CM (8)**; below → **DM (6)**, unless his deepest fellow starting central mid played on average **≥ 2 m deeper** over **≥ 5 starts** beside one → **CM, method `partner`**.
+  - **Otherwise the formation:** DM if more than half of his central-mid minutes came as the only DM-role starter in his side (a single pivot), else CM (a 4-2-3-1 double pivot mixes 6s and 8s). A listed-slot player whose slot is DM in some formations and CM in others gets CM.
+  - Shown as "borderline" within 1 m of the cut. The outfield-average depth is a second opinion in `report depth` only, not stored.
 - **Rebuilds are deterministic:** one transaction per scope (delete, then insert); `computed_at` is the latest `match.normalized_at`; the `scope` row is kept, so its ID is stable.
 - **Per 90:** `per90 = total / minutes × 90`, using the canonical `/players` minutes (D-010). It's NULL when `minutes = 0`.
 - **Fractions:** `rate = SUM(value) / SUM(denominator)`, NULL when the denominator is 0. **Never average per-match percentages.**
@@ -253,20 +263,21 @@ percentile         peer_group_id, player_id, metric_id, basis ('per90'|'rate'),
 
   The first 8 rows came from the spike; the other 11 from `report formations` after the EPL 2025/26 crawl, which covers every formation used that season (D-013).
 
-  **Judgement calls, checked against real players in slice 2c (D-016):** 3-4-2-1's 84/86 changed from AM to **W** (mostly wingers playing as inside forwards); 4-3-2-1's 84/86 stay AM; 4-2-3-1's 64/66 stay DM; slot 95 stays AM. The 4-2-3-1 double pivot mixes 6s and 8s, which formation slots can't separate: the reason for the slice 2d split by heatmap depth.
+  **Judgement calls, checked against real players in slice 2c (D-016):** 3-4-2-1's 84/86 changed from AM to **W** (mostly wingers playing as inside forwards); 4-3-2-1's 84/86 stay AM; 4-2-3-1's 64/66 stay DM; slot 95 stays AM. The 4-2-3-1 double pivot mixes 6s and 8s, which formation slots can't separate: the reason for the 6/8 split by heatmap depth (§6).
 - **Formations not in the table:** the sync reports them in its summary, and their starters get `role = NULL` (the appearance still counts, through the broad category) until the mapping is added. It never guesses. `scouting report formations` lists them for a season; new leagues will add more.
 - **Tests:** a table-driven test covers every (formation, slot) pair, plus known players (Frimpong 32 → FB/R, Kerkez 38 → FB/L, Wirtz 85 → AM).
 - **A player's season role:** `primary_role` is the role with the most minutes **as a starter**.
   - Fallback (no starts): the profile's `listed_slot_code`, only where every mapped formation agrees on that slot (§6, slice 2a).
   - Otherwise no role. A broad `sub_category` alone can't pick a peer group (DEF could be CB or FB), so it isn't used; such players are almost always below the minimum minutes anyway (EPL 2025/26: 44 without a role, none above 855 minutes).
-- **Peer roles** (7 now; 8 after slice 2d-3): the position presets from the requirements, plus a separate group for central 10s (D-011):
+- **Peer roles** (8 since slice 2d-3): the position presets from the requirements, plus separate groups for 6s and central 10s (D-011, D-018):
 
   | `peer_role` | Detailed roles it groups | Note |
   |---|---|---|
   | GK | GK | |
   | CB | CB | |
   | FB | FB, WB | |
-  | CM | DM, CM | Splits into DM (6s) and CM (8s) in slice 2d-3, by season heatmap depth (D-017); the slot-based detailed role stays as it is |
+  | DM | DM, CM (6s) | Decided by season heatmap depth, not by slot (§6). EPL 2025/26: 28 |
+  | CM | DM, CM (8s) | Same rule. EPL 2025/26: 48 (incl. Bernardo and João Gomes by the partner rule, Bergvall by formation) |
   | AM | AM (central 10s: 85 in 4-2-3-1; 84/86 in 4-3-2-1; 95) | A 10 isn't judged against deeper CMs, e.g. Nico Paz vs Barrios. EPL 2025/26: 17 players, below the warning line, accepted (D-017) |
   | W | W (wingers, wide AMs 83/87, wide midfielders in a 4-4-2 / 4-1-4-1, 3-4-2-1's 84/86) | |
   | ST | ST | |
@@ -284,7 +295,7 @@ metric_mapping fm_metric_id, real_metric_id, comparability ('direct'|'approximat
 player_link    fm_player_id, real_player_id, method ('manual'|'name_dob'|'name_team'), confidence, created_at
 ```
 
-Each import is a snapshot, so tracking a player over time means comparing scopes. Nothing here depends on the FM format beyond "a table of columns". The real header mapping waits for a real `.rtf` file (D-006).
+Each import is a snapshot, so tracking a player over time means comparing scopes. Nothing here depends on the FM format beyond "a table of columns". The real header mapping waits for a real `.rtf` file (D-006). FM scopes have no heatmaps, so the 6/8 split for FM players will need its own rule (FM's position/role), decided in Phase 6.
 
 ## 9. Normalization and idempotency
 
@@ -314,7 +325,7 @@ Each import is a snapshot, so tracking a player over time means comparing scopes
 |---|---|---|
 | 1 | Long `stat_value` table, or wide columns? | **Long** |
 | 2 | Separate `raw.db` with gzip bodies? | **Yes** |
-| 3 | Peer roles | **7 groups**: central 10s (AM) are their own group; wide AMs and wide midfielders go with wingers (§7). **8 after slice 2d-3** (DM split from CM by heatmap depth, D-017) |
+| 3 | Peer roles | **7 groups** at first: central 10s (AM) are their own group; wide AMs and wide midfielders go with wingers (§7). **8 since slice 2d-3** (DM split from CM by heatmap depth, D-018) |
 | 4 | Rating average | **Simple mean over rated matches.** Low priority, not in the default radars |
 | 5 | Minimum minutes | **25% of possible minutes by default, adjustable in the UI**, and players can be added to a comparison manually (§6) |
 | 6 | Unused substitutes | **Not stored** |

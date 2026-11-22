@@ -15,37 +15,40 @@
 - **Hosting:** stay local for now (noted under D-007).
 - **Project docs:** Claude maintains the `claude/` set; the top-level copies' status is unconfirmed by the user.
 
-## Session 2026-11-20 (evening): slice 2c (done)
+## Session 2026-11-20 (evening): slice 2c (done, D-016)
 
-- Built `db/checks.py` + `scripts/check_2c.py` + the "85th (n=57)" display fix; the user ran the checks on EPL 2025/26.
-- **Decided (D-016):** `was_fouled` NULL = 0; `launch_pct`/`claim_rate` are their counts' ratios (templates use `claims_won`); 3-4-2-1's 84/86 → W (3-4-2-1 only); xA over xAG (verified real xA by check 5); no xA on the CB template; 6s and 8s to become separate peer groups by heatmap depth.
-- **Closing run:** peer groups GK 25 · CB 67 · FB 62 · CM 76 · AM 17 · W 65 · ST 33; 25,034 percentiles; Salah `was_fouled` 0.6704 per 90.
+- `db/checks.py` + `scripts/check_2c.py` + "85th (n=57)" display; `was_fouled` NULL = 0; 3-4-2-1's 84/86 → W; xA over xAG.
+- **Closing run:** peer groups GK 25 · CB 67 · FB 62 · CM 76 · AM 17 · W 65 · ST 33; 25,034 percentiles.
 
-## Session 2026-11-21: slice 2d (6/8 split)
+## Session 2026-11-21: slice 2d (6/8 split; D-017, D-018) — DONE
 
-**User decisions (D-017):** AM at 17 accepted with the warning (pooling later). Team-relative depth decides; partner rank is a cross-check. ≥ 5 central-mid starts with heatmaps to classify by depth, else formation fallback. Plan approved as steps, **one zip per step, each explained; "go" before each step**. Anchors (provisional, "don't take my words as 100%"): 6s Caicedo, T. Adams, Xhaka, Garner, Baleba, Berge, Ugarte; 8s Bruno G., Enzo F., A. Scott, Tielemans, Stach, Gallagher, Mac Allister.
+- Final groups **GK 25 · CB 67 · FB 62 · DM 28 · CM 48 · AM 17 · W 65 · ST 33**; split by depth 73 · deeper partner 2 · formation 1. Docs updated.
+- User's migration IDs: heatmap depth `5019ed9e4215`, dm peer role `2f97036a9459`. Send migration paste text as `.txt` (ERRORS.md).
 
-**Heatmap spike** (`spike_2d_heatmaps.zip`): per-player heatmaps, one request per match, `acting_ltr` = every team attacks towards high x. Details in PITCHAPI_NOTES.
+## Session 2026-11-21 (evening): slice 2e (templates) — 2e-3 delivered, then close-out
 
-**2d-1 DONE** (`slice_2d1.zip`): migration (3 `ADD COLUMN`s) applied; online `sync season` made exactly 380 requests, all heatmaps `ok`; spot checks matched the spike (Acheampong 0.379 / 139 actions; Onana 0.443 / 65).
+**User decisions (to record as D-019 in the close-out doc batch):**
+- **Phase 2 ends with 2e + a close-out step:** full offline rebuild run twice with equal checksums, README update. (The "6 or 8" line move was done early, in 2e-3.)
+- **Custom templates:** three foundations built in 2e-3. Storage (separate `user.db`), API and edit UI in Phases 3–4; whether "duplicate and edit" is MVP decided then.
+- **Backlog:** cross-position templates and weights/composite scores (label which group each percentile is from or rank against one chosen group; weights double-count correlated metrics, percentiles are ranks, ineligible metrics, false precision → section weights, breakdown bars, rank order). Possession-adjusted volume stats.
+- **A–E approved (17:24):** A volume metrics next to success rates (built as derived metrics, no renormalize); B dribbles_completed over take_ons_completed, chances_created over key_passes (/players, coverage + FM names); C VAEP/PV on the player card, not templates; D template size 8–14 (GK 8); E passes_completed min_attempts 200 → 100.
+- **Template file format: TOML** (stdlib `tomllib`, no new dependency; user 17:39). The FM mapping file (Phase 6) should use TOML too.
+- **Picks:** exactly as in `src/scouting/mappings/position_templates.toml` (GK 8; others 12). W deliberately attacking (no out-of-possession). ST keeps xgot (includes penalties, accepted) and defensive_actions (accepted).
 
-**2d-2 DONE** (`slice_2d2.zip`: `metrics/depth.py` + `scouting report depth`, 469 tests). **User's run on EPL 2025/26 (2026-11-21 13:46):**
-- **No natural gap:** one smooth bell under both references; ~a dozen players within 1 m of any cut.
-- **outfield reference:** cut −0.014 (−1.5 m), margin 0.002; anchor gap Xhaka −1.7 m vs Mac Allister −1.3 m (0.4 m); DM 33 · CM 42 · fallback 1 (Bergvall, 4 starts); Garner (+1.5 m) on the wrong side; Rice DM (−2.5 m).
-- **centre_backs reference:** cut +0.133 (+13.9 m), margin 0.012; anchor gap Berge +12.6 m vs Scott +15.2 m (2.6 m); DM 29 · CM 46 · fallback 1; Garner (+17.8 m) on the wrong side; **Rice CM (+14.3 m), correct as Arsenal's left 8.**
-- Cross-check disagreement under both: **Bernardo Silva** (DM by depth: +12.8 m from CBs; deepest of City's mids only 13% of 23 starts; Rodri/Nico González deeper).
-- Notable labels (outfield `--all`): deepest Adams, Bogarde, Zubimendi, Rodri, Nico González…; highest Hannibal, Munetsi, Stach, Foden, Reijnders…
+**Run results:**
+- **2e-2 (17:38):** 531 passed; aggregate groups unchanged; **percentiles 26,693** (25,034 + 1,650 volume + 9 more on pass completion, exactly as predicted).
+- **check_2e:** xGOT includes penalties (20/20 single-shot scored penalties have xGOT, mean 0.794; control 271/271). defensive_actions = tackles + interceptions + clearances + shot_blocks + recoveries in 68.3% of 10,725 outfield appearances, otherwise ~1.09 lower on average (overlaps probably counted once; unverified). Descriptions updated in the registry.
 
-**User decisions after the report (2026-11-21 13:49):**
-1. Asked whether the two references can be combined → Claude's answer: a simple average of the two (from the report's rounded values) narrows the anchor gap to ≈ 1.7 m (Xhaka ≈ 5.4 m vs Mac Allister ≈ 7.1 m) and flips Rice back to DM, so it dilutes the better signal; recommended the **centre-back line alone, with the outfield value kept visible as a second opinion**. Waiting for the user to confirm.
-2. **Cut: 14 m in front of the centre-backs** (0.1333 of the pitch length) — recommended, accepted.
-3. **Garner moves to the 8 anchors** — accepted.
-4. **Depth decides, but Bernardo should be an 8**; the user asked for a way to detect "a significantly deeper midfielder". Claude proposed a **partner gap** rule: per match, his depth minus the depth of his deepest fellow central mid; season minutes-weighted; a player labelled DM by depth whose deepest partner is on average ≥ G metres deeper becomes CM ("an 8 beside a deeper 6"). Uses the size of the gap, not the rank, so close double 6s (Onana/Kamara) stay DM. G to be chosen from data: proposed step **2d-2b** = extend `report depth` (centre-back reference + 14 m cut + Garner as 8 as defaults; partner gap column; who flips at candidate G of 2/3/4/5 m). Waiting for "go".
-5. **Store season depth and the decision method; show depth with the label (e.g. "DM · 12.6 m in front of his CBs", borderline within ~1 m).** User: **in the UI (Phase 4) this display must be removable/toggleable in case it looks out of shape.**
+**2e-3 BUILT and delivered (`slice_2e3.zip`, ~17:45, 6 files, no migration):**
+- `mappings/position_templates.toml` (8 templates with sections; comments record the user's choices).
+- `metrics/templates.py`: `Template`/`TemplateSection` (id `builtin:ROLE`, `builtin` flag), `parse_templates()` (pydantic shape check, `TemplateError`), `builtin_templates()` (importlib.resources), `Finding(severity, rule, message, code)`, `check_template()` (errors: unknown_metric, wrong_position via applies_to, duplicate, empty, unknown_role; built-in errors / custom warnings: outcome, near_duplicate (xa/xag, key_passes/chances_created, dribbles/take_ons, claims_won/claim_rate), size 8–14), `check_coverage()` (warning when < 50% of the group is ranked), `apply_template(PlayerSeason, Template) -> TemplateView` (rows with line, pct, ranked_among, basis, model flag, direction, reason; `same_group` flag when the template is for another position), `missing_reason()`.
+- CLI: `inspect player … --template` (sections with values and percentiles or the reason), `report templates --league --season`; "6 or 8" line now after "as a starter".
+- Registry: xgot and defensive_actions descriptions from check_2e.
+- Tests: `tests/unit/metrics/test_templates.py` (18) + 4 CLI tests. 541 passed + 12 skipped (user: 553).
+- **Expected on real data:** `report templates` → "all templates pass" (lowest coverage: FB crosses 57/62, GK claims 23/25, W dribbles 63/65, ST passes at 100 ≈ 32/33).
+- **Waiting for the user's run.** Then the close-out zip: README update, offline rebuild twice + checksum; then the doc batch: D-019 in DECISIONS, SCHEMA (registry `outcome`/`volume_of`, volume metrics, templates), PLAN (2e done, Phase 2 done), CONTEXT, TEMPLATE_OPTIONS (mark as decided).
 
-**Record as D-018 once G is chosen** (then update PLAN, CONTEXT, DECISIONS, SCHEMA).
-
-**Process notes:** run `ruff format` only on changed files (it once reformatted `settings.py`). Test throwaway scripts on fake shapes too. The fixture reuses player names across teams: rename players in tests that look anchors up by name.
+**Process notes:** run `ruff format` only on changed files. Test throwaway scripts on fake shapes too. The fixture reuses player names across teams: rename players in tests that look anchors up by name. Import `metrics.depth` as a module in the CLI; defaults that tests patch must be read at call time. The alembic post-write ruff hook strips unused `sa`/`op` imports from an empty revision. The fixture's lineups have no second DM, so relabelled left-backs are lone pivots. Ruff flags `×` in strings/comments (RUF001/RUF003): use `x`; and SIM300 flags `const <= set(...)`-style asserts. `Result.tuples()` is deprecated in SQLAlchemy 2.1: unpack rows instead. At the 100-pass minimum one fixture full-back qualifies. The fixture season has no CB/DM/CM/AM groups.
 
 ## How the user works (summary; full list in CONTEXT.md §7)
 

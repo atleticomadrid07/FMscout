@@ -237,8 +237,8 @@ def test_report_thresholds(seeded: None) -> None:
     result = invoke("report", "thresholds", *SEASON_ARGS)
     assert result.exit_code == 0, result.output
     passes = next(line.split() for line in result.output.splitlines() if "passes_completed" in line)
-    # Every fixture player has far fewer than 200 passes: ranked 0 of those with data.
-    assert passes[:2] == ["passes_completed", "200"] and all(c.startswith("0/") for c in passes[2:])
+    # At the 100-pass minimum one fixture full-back qualifies; everyone else is left out.
+    assert passes == ["passes_completed", "100", "0/4", "1/2", "0/2", "0/2"]
     claims = next(line.split() for line in result.output.splitlines() if "claim_rate" in line)
     assert "-" in claims  # outfield groups have no keeper data
 
@@ -259,7 +259,7 @@ def test_inspect_player_explains_missing_percentiles(seeded: None) -> None:
         "inspect", "player", "p_CGK01", *SEASON_ARGS, "--metric", "passes_completed"
     ).output
     assert "percentiles vs 4 GKs (≥ 45 min)" in keeper
-    assert "< 200 att" in keeper
+    assert "< 100 att" in keeper
     sub = invoke("inspect", "player", "p_BGK03", *SEASON_ARGS).output
     assert "percentiles: not ranked (below 45 min)" in sub
 
@@ -278,7 +278,7 @@ def test_aggregate_picks_up_registry_changes(seeded: None) -> None:
             )
         }
     engine.dispose()
-    assert rows["passes_completed"] == 200 and len(rows) == 12
+    assert rows["passes_completed"] == 100 and len(rows) == 12
 
 
 # --- slice 2c: the data-check script on a migrated database ------------------------------------
@@ -512,3 +512,96 @@ def test_template_options_script_explains_a_missing_season(
         runpy.run_path(str(OPTIONS_SCRIPT), run_name="__main__")
     assert exit_info.value.code == 1
     assert "isn't in scouting.db" in capsys.readouterr().err
+
+
+CHECK_2E = Path(__file__).parents[3] / "scripts" / "check_2e.py"
+
+
+def test_check_2e_script_runs_read_only(
+    seeded: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    before = invoke("report", "checksum").output
+    monkeypatch.setattr(sys, "argv", ["check_2e.py", *SEASON_ARGS])
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(CHECK_2E), run_name="__main__")
+    out = capsys.readouterr().out
+    assert exit_info.value.code == 0, out
+    assert "1. Does xGOT include penalties?" in out
+    assert "2. What adds up to defensive_actions?" in out
+    assert invoke("report", "checksum").output == before  # wrote nothing
+
+
+def test_check_2e_script_runs_one_check(
+    seeded: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    monkeypatch.setattr(sys, "argv", ["check_2e.py", *SEASON_ARGS, "--only", "2"])
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(CHECK_2E), run_name="__main__")
+    out = capsys.readouterr().out
+    assert exit_info.value.code == 0, out
+    assert "2. What adds up" in out and "1. Does xGOT" not in out
+
+
+def test_inspect_player_by_match_shows_a_volume_metrics_parent(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    out = invoke(
+        "inspect", "player", "p_CGK01", *SEASON_ARGS,
+        "--metric", "passes_completed_count", "--matches",
+    ).output  # fmt: skip
+    assert "passes_completed_count by match (stored values, from passes_completed):" in out
+    assert " / " in out.split("by match")[1]  # the parent's successes / attempts per match
+
+
+# --- slice 2e-3: position templates -----------------------------------------------------------
+
+
+def test_inspect_player_with_his_template(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    result = invoke("inspect", "player", "p_AST01", *SEASON_ARGS, "--template")
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "template: Striker (ST) · 12 metrics" in out
+    lines = out.splitlines()
+    sections = [
+        line.strip()
+        for line in lines
+        if line.strip() in ("Shooting", "Link-up", "Aerial", "Pressing")
+    ]
+    assert sections == ["Shooting", "Link-up", "Aerial", "Pressing"]
+    npxg = next(line for line in lines if line.strip().startswith("npxg (model)"))
+    assert "(n=2)" in npxg
+    passes = next(line for line in lines if line.strip().startswith("passes_completed"))
+    assert "needs 100 attempts" in passes
+    assert "his peer group is" not in out
+
+
+def test_inspect_player_template_rules(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    both = invoke("inspect", "player", "p_AST01", *SEASON_ARGS, "--template", "--metric", "npxg")
+    assert both.exit_code == 1 and "can't be combined" in both.output
+
+
+def test_inspect_player_lists_the_split_after_the_starts(
+    seeded: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    midfield_fixture(tmp_path, monkeypatch)
+    out = invoke("inspect", "player", "cleo deep", *SEASON_ARGS, "--metric", "goals").output
+    lines = [line.strip() for line in out.splitlines()]
+    starts = next(i for i, line in enumerate(lines) if line.startswith("as a starter:"))
+    assert lines[starts + 1].startswith("6 or 8:")  # the breakdown belongs to the role line
+
+
+def test_report_templates(seeded: None) -> None:
+    invoke("sync", "season", *SEASON_ARGS, "--offline")
+    result = invoke("report", "templates", *SEASON_ARGS)
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert (
+        "ST  Striker · 12 metrics (Shooting 4 · Link-up 5 · Aerial 2 · Pressing 1) · group 2" in out
+    )
+    # The fixture season has no centre-backs or midfielders, so those templates have no group.
+    assert "warning: no CB peer group this season" in out
+    assert "error" not in out
+    assert "see the findings above" in out

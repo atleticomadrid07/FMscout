@@ -1,4 +1,4 @@
-"""Read-only data checks for slice 2c: the open questions in PLAN.md (D-014, D-015).
+"""Read-only data checks for slices 2c and 2e: the open questions in PLAN.md (D-014, D-015).
 
 Each check answers one question about what PitchAPI's numbers mean, from scouting.db alone
 (no raw.db, no API calls, no writes). `scripts/check_2c.py` prints them; the user runs it
@@ -8,6 +8,7 @@ the call to a person.
 
 from __future__ import annotations
 
+import itertools
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
@@ -666,3 +667,110 @@ def check_xa_definition(session: Session, season_id: int) -> XaDefinitionCheck:
             )
         )
     return XaDefinitionCheck(rows=len(rows), total_xa=total_xa, no_chance=no_chance)
+
+
+# --- slice 2e: what the striker template's xGOT and defensive actions contain -----------------
+
+
+def _appearance_values(
+    session: Session, season_id: int, codes: Sequence[str], *, outfield: bool = True
+) -> list[dict[str, float | None]]:
+    """One dict per appearance in the season: code -> stored value, None when there's no row
+    or the stored value is NULL."""
+    ids = _metric_ids(session, codes)
+    values = {code: aliased(StatValue) for code in codes}
+    stmt = (
+        select(*(values[code].value for code in codes))
+        .select_from(Appearance)
+        .join(Match, Match.id == Appearance.match_id)
+        .where(Match.season_id == season_id)
+    )
+    if outfield:
+        stmt = stmt.where(Appearance.is_goalkeeper.is_(False))
+    for code, alias in values.items():
+        stmt = stmt.outerjoin(
+            alias, and_(alias.appearance_id == Appearance.id, alias.metric_id == ids[code])
+        )
+    return [dict(zip(codes, row, strict=True)) for row in session.execute(stmt)]
+
+
+@dataclass(frozen=True, slots=True)
+class OneShotGoals:
+    rows: int  # appearances whose only shot was a goal of this kind
+    xgot_positive: int  # of those, xgot > 0 (a scored shot is on target)
+    mean_xgot: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class XgotPenaltyCheck:
+    penalty: OneShotGoals  # the only shot was a scored penalty (npxg = 0, xg > 0)
+    open_play: OneShotGoals  # control: the only shot was a scored non-penalty (npxg > 0)
+
+
+def check_xgot_penalties(session: Session, season_id: int) -> XgotPenaltyCheck:
+    """Does xGOT include penalties? Appearances whose single shot was a scored penalty have
+    xgot > 0 only if it does. Scored non-penalty single shots are the control (~100%)."""
+    rows = [
+        r
+        for r in _appearance_values(session, season_id, ("shots", "goals", "xg", "npxg", "xgot"))
+        if r["shots"] == 1 and (r["goals"] or 0) >= 1 and r["xg"] is not None
+    ]
+
+    def summarise(kind: list[dict[str, float | None]]) -> OneShotGoals:
+        xgots = [r["xgot"] or 0.0 for r in kind]
+        return OneShotGoals(
+            rows=len(kind),
+            xgot_positive=sum(x > 0 for x in xgots),
+            mean_xgot=statistics.fmean(xgots) if xgots else None,
+        )
+
+    penalty = [r for r in rows if not r["npxg"] and (r["xg"] or 0) > 0]
+    open_play = [r for r in rows if (r["npxg"] or 0) > 0]
+    return XgotPenaltyCheck(summarise(penalty), summarise(open_play))
+
+
+DEFENSIVE_COMPONENTS: Final[tuple[str, ...]] = (
+    "tackles", "interceptions", "clearances", "headed_clearances", "shot_blocks",
+    "recoveries", "clearances_off_line", "last_man_tackles", "duels_won",
+)  # fmt: skip
+FORMULAS_SHOWN: Final = 3
+
+
+@dataclass(frozen=True, slots=True)
+class Formula:
+    components: tuple[str, ...]
+    exact: int  # appearances where defensive_actions equals the sum exactly
+    mean_gap: float  # mean of defensive_actions minus the sum (+ = it counts more)
+
+
+@dataclass(frozen=True, slots=True)
+class DefensiveActionsCheck:
+    rows: int  # outfield appearances with defensive_actions stored
+    best: list[Formula]  # the sums that match most often, best first
+
+
+def check_defensive_actions(session: Session, season_id: int) -> DefensiveActionsCheck:
+    """Which counts add up to defensive_actions? Tries every combination of the candidate
+    components (a missing count is 0) and reports how often each sum matches exactly."""
+    codes = ("defensive_actions", *DEFENSIVE_COMPONENTS)
+    rows = [
+        r
+        for r in _appearance_values(session, season_id, codes)
+        if r["defensive_actions"] is not None
+    ]
+    targets = [r["defensive_actions"] or 0.0 for r in rows]
+    columns = {c: [r[c] or 0.0 for r in rows] for c in DEFENSIVE_COMPONENTS}
+    formulas = []
+    for size in range(1, len(DEFENSIVE_COMPONENTS) + 1):
+        for combo in itertools.combinations(DEFENSIVE_COMPONENTS, size):
+            sums = [sum(parts) for parts in zip(*(columns[c] for c in combo), strict=True)]
+            gaps = [t - s for t, s in zip(targets, sums, strict=True)]
+            formulas.append(
+                Formula(
+                    components=combo,
+                    exact=sum(abs(g) < 1e-9 for g in gaps),
+                    mean_gap=statistics.fmean(gaps) if gaps else 0.0,
+                )
+            )
+    formulas.sort(key=lambda f: (-f.exact, abs(f.mean_gap), len(f.components)))
+    return DefensiveActionsCheck(rows=len(rows), best=formulas[:FORMULAS_SHOWN])

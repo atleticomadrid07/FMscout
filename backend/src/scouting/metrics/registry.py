@@ -64,6 +64,12 @@ class MetricDef:
     # Fractions only: fewest season attempts (or weight) for a percentile (D-014).
     min_attempts: int | None = None
     no_direction: bool = False  # a style metric (see Direction)
+    # An outcome (needs a goal or a penalty to happen): kept off position templates (D-015).
+    outcome: bool = False
+    # A volume metric derived from a success-rate metric (slice 2e, decision A): its season
+    # total is the parent's successes, ranked per 90. Never ingested (no stat_value rows);
+    # aggregation copies it from the parent's season row.
+    volume_of: str | None = None
 
     @property
     def is_fraction(self) -> bool:
@@ -190,13 +196,14 @@ def _gk_rate(code: str, label: str, key: str, weight_key: str, desc: str, unit: 
 
 
 # Every source key below was seen in the Phase 0 spike (PITCHAPI_NOTES). v0 (slice 1c) had
-# the first 18; slice 1d brings the registry to 90. Codes are stable: never rename or reuse.
+# the first 18; slice 1d brings the registry to 90 (95 after the crawl), plus 5 derived volume
+# metrics in slice 2e. Codes are stable: never rename or reuse (labels may change).
 # --- percentile eligibility (D-014): tune here -------------------------------------------------
 #
 # Fewest season attempts for a success-rate percentile. Starting values approved 2026-11-20;
 # `scouting report thresholds` shows how many players each one excludes per peer group.
 MIN_ATTEMPTS: Final[dict[str, int]] = {
-    "passes_completed": 200,
+    "passes_completed": 100,  # 200 until slice 2e (decision E: lets more strikers in)
     "long_balls_completed": 20,
     "crosses_completed": 20,
     "dribbles_completed": 15,
@@ -211,6 +218,14 @@ MIN_ATTEMPTS: Final[dict[str, int]] = {
 }
 # Style metrics: a percentile, but no "good" or "bad" colour.
 NO_DIRECTION: Final[frozenset[str]] = frozenset({"launch_pct", "avg_pass_length", "corners"})
+# Outcomes: counts that need a goal or a penalty to happen. Shown on the player page, never
+# on a position template (D-015; the list as agreed in slice 2e).
+OUTCOMES: Final[frozenset[str]] = frozenset(
+    {
+        "goals", "assists", "gca", "second_assists", "big_chances_missed", "goals_conceded",
+        "errors_led_to_goal", "own_goals", "penalties_missed", "penalties_saved",
+    }
+)  # fmt: skip
 
 
 def _tuned(metric: MetricDef) -> MetricDef:
@@ -218,7 +233,35 @@ def _tuned(metric: MetricDef) -> MetricDef:
         metric,
         min_attempts=MIN_ATTEMPTS.get(metric.code),
         no_direction=metric.code in NO_DIRECTION,
+        outcome=metric.code in OUTCOMES,
     )
+
+
+def _volume(parent: MetricDef, code: str, label: str) -> MetricDef:
+    """Successes per 90 of a success-rate metric, as its own count metric (decision A)."""
+    assert parent.is_fraction and not parent.value_is_rate, parent.code
+    return MetricDef(
+        code,
+        label,
+        "count",
+        parent.source,
+        parent.source_key,
+        "zero",
+        parent.applies_to,
+        f"{label} (the successes of {parent.code}), ranked per 90. Derived at aggregation "
+        "from the same data; never stored per match.",
+        volume_of=parent.code,
+    )
+
+
+# (volume code, label, parent code): slice 2e, decision A.
+_VOLUMES: Final = (
+    ("passes_completed_count", "Passes completed", "passes_completed"),
+    ("crosses_completed_count", "Crosses completed", "crosses_completed"),
+    ("dribbles_completed_count", "Successful dribbles", "dribbles_completed"),
+    ("long_balls_completed_count", "Long balls completed", "long_balls_completed"),
+    ("aerials_won_count", "Aerial duels won", "aerials_won"),
+)
 
 
 _DEFINITIONS: Final[tuple[MetricDef, ...]] = (
@@ -237,14 +280,15 @@ _DEFINITIONS: Final[tuple[MetricDef, ...]] = (
            "Expected assists from /players (model). The template choice over xag: wider "
            "coverage, and the same endpoint as npxg (D-016). See also xag.", "xA"),
     _model("xgot", "xGOT", _P, "expected_goals_on_target_variant", "outfield",
-           "Expected goals on target. NULL when the player had no shot on target, which "
-           "counts as 0 in season totals.", "xG",
+           "Expected goals on target, penalties included (check_2e: all 20 single-shot "
+           "scored penalties have it; npxG excludes them). NULL when the player had no shot "
+           "on target, which counts as 0 in season totals.", "xG",
            absence="null", season_null="zero"),
-    _fraction("passes_completed", "Passes completed", _P, "accurate_passes", "all",
+    _fraction("passes_completed", "Pass completion %", _P, "accurate_passes", "all",
               "Accurate passes out of attempted passes."),
-    _fraction("crosses_completed", "Crosses completed", _P, "accurate_crosses", "outfield",
+    _fraction("crosses_completed", "Cross completion %", _P, "accurate_crosses", "outfield",
               "Accurate crosses out of attempted crosses."),
-    _fraction("dribbles_completed", "Dribbles completed", _P, "dribbles_succeeded", "outfield",
+    _fraction("dribbles_completed", "Dribble success %", _P, "dribbles_succeeded", "outfield",
               "Successful dribbles out of attempted dribbles."),
     _count("tackles", "Tackles", _P, "matchstats.headers.tackles", "all",
            "Tackles. Same value as the advanced endpoint's defending.tackles (spike: 277/277)."),
@@ -285,7 +329,7 @@ _DEFINITIONS: Final[tuple[MetricDef, ...]] = (
            "an alternative definition. Never add it to key_passes."),
     _count("big_chances_created", "Big chances created", _P, "big_chance_created_team_title",
            "outfield", "Big chances created."),
-    _fraction("long_balls_completed", "Long balls completed", _P, "long_balls_accurate", "all",
+    _fraction("long_balls_completed", "Long-ball completion %", _P, "long_balls_accurate", "all",
               "Accurate long balls out of attempted long balls."),
     _count("passes_final_third", "Passes into final third", _P, "passes_into_final_third",
            "outfield", "Passes into the final third."),
@@ -362,14 +406,16 @@ _DEFINITIONS: Final[tuple[MetricDef, ...]] = (
     _count("errors_led_to_goal", "Errors leading to a goal", _P, "errors_led_to_goal", "all",
            "Errors leading to a goal.", lower_is_better=True),
     _count("defensive_actions", "Defensive actions", _P, "defensive_actions", "outfield",
-           "PitchAPI's composite of defensive actions (undocumented mix; overlaps tackles, "
-           "interceptions and clearances). Don't add it to them."),
+           "PitchAPI's own count. Equals tackles + interceptions + clearances + shot blocks "
+           "+ recoveries in 68% of EPL 2025/26 matches and is about 1 lower otherwise "
+           "(check_2e; overlapping actions probably counted once, unverified). Don't add it "
+           "to its parts."),
     _count("duels_won", "Duels won", _P, "duel_won", "outfield", "Duels won."),
     _count("duels_lost", "Duels lost", _P, "duel_lost", "outfield", "Duels lost.",
            lower_is_better=True),
     _fraction("ground_duels_won", "Ground duels won", _P, "ground_duels_won", "outfield",
               "Ground duels won out of ground duels contested."),
-    _fraction("aerials_won", "Aerial duels won", _P, "aerials_won", "outfield",
+    _fraction("aerials_won", "Aerial duel success %", _P, "aerials_won", "outfield",
               "Aerial duels won out of aerial duels contested."),
     _count("fouls_committed", "Fouls committed", _P, "fouls", "all", "Fouls committed.",
            lower_is_better=True),
@@ -440,8 +486,15 @@ _DEFINITIONS: Final[tuple[MetricDef, ...]] = (
              "which passes it averages isn't documented).", "m"),
 )  # fmt: skip
 
-REGISTRY: Final[tuple[MetricDef, ...]] = tuple(_tuned(m) for m in _DEFINITIONS)
+_INGESTED: Final = tuple(_tuned(m) for m in _DEFINITIONS)
+_PARENTS: Final = {m.code: m for m in _INGESTED}
+REGISTRY: Final[tuple[MetricDef, ...]] = _INGESTED + tuple(
+    _tuned(_volume(_PARENTS[parent], code, label)) for code, label, parent in _VOLUMES
+)
 BY_CODE: Final[dict[str, MetricDef]] = {m.code: m for m in REGISTRY}
+# What a match sync stores (volume metrics are derived at aggregation instead).
+INGESTED: Final[tuple[MetricDef, ...]] = tuple(m for m in REGISTRY if m.volume_of is None)
+VOLUMES: Final[tuple[MetricDef, ...]] = tuple(m for m in REGISTRY if m.volume_of is not None)
 
 # Every /players key seen in the Phase 0 spike (PITCHAPI_NOTES). A key outside this set and
 # outside the registry is new from the provider; the sync logs it once so it gets noticed.

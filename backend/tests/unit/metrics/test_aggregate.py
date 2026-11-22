@@ -19,6 +19,7 @@ from scouting.db.models import (
     Match,
     MatchSourceId,
     Metric,
+    Percentile,
     PlayerScope,
     PlayerScopeRole,
     PlayerScopeStat,
@@ -36,6 +37,7 @@ from scouting.metrics.aggregate import (
     aggregate_season,
     default_min_minutes,
 )
+from scouting.metrics.registry import VOLUMES
 
 LEAGUE, SEASON = "l_FIXT01", "2025/2026"
 Snapshot = Callable[[Engine], dict[str, list[tuple[Any, ...]]]]  # the conftest fixture
@@ -313,3 +315,54 @@ def test_season_without_synced_matches_is_refused(synced_season: Engine) -> None
         session.execute(update(Match).values(normalized_at=None))
     with pytest.raises(AggregateError, match="no synced matches"):
         aggregate(synced_season)
+
+
+# --- slice 2e: volume metrics (decision A) ----------------------------------------------------
+
+
+def test_volume_metrics_copy_their_parents_successes(synced_season: Engine) -> None:
+    aggregate(synced_season)
+    with Session(synced_season) as session:
+        ids = {code: mid for code, mid in session.execute(select(Metric.code, Metric.id))}
+        for volume in VOLUMES:
+            assert volume.volume_of is not None
+            # Never stored per match: the match sync skips volume metrics.
+            assert not session.scalars(
+                select(StatValue).where(StatValue.metric_id == ids[volume.code])
+            ).first()
+            rows = {
+                s.player_id: s
+                for s in session.scalars(
+                    select(PlayerScopeStat).where(PlayerScopeStat.metric_id == ids[volume.code])
+                )
+            }
+            parents = {
+                s.player_id: s
+                for s in session.scalars(
+                    select(PlayerScopeStat).where(
+                        PlayerScopeStat.metric_id == ids[volume.volume_of]
+                    )
+                )
+            }
+            assert rows.keys() == parents.keys() and rows, volume.code
+            for player, row in rows.items():
+                parent = parents[player]
+                assert (row.total, row.minutes, row.matches_with_value, row.per90) == (
+                    parent.total, parent.minutes, parent.matches_with_value, parent.per90,
+                )  # fmt: skip
+                assert row.denominator is None and row.rate is None
+                assert parent.per90 is not None and parent.total is not None
+                assert parent.per90 == pytest.approx(parent.total * 90 / parent.minutes)
+
+
+def test_volume_metrics_get_per90_percentiles(synced_season: Engine) -> None:
+    aggregate(synced_season)
+    with Session(synced_season) as session:
+        bases = set(
+            session.scalars(
+                select(Percentile.basis)
+                .join(Metric, Metric.id == Percentile.metric_id)
+                .where(Metric.code == "passes_completed_count")
+            )
+        )
+    assert bases == {"per90"}  # ranked on volume; the parent stays ranked on its rate

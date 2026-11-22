@@ -37,6 +37,7 @@ from scouting.db.queries import (
     appearance_detail,
     find_players,
     metric_by_match,
+    metric_coverage,
     peer_ranking,
     player_season,
     threshold_report,
@@ -68,6 +69,14 @@ from scouting.metrics.depth import (
 )
 from scouting.metrics.percentiles import SMALL_GROUP
 from scouting.metrics.registry import BY_CODE
+from scouting.metrics.templates import (
+    TemplateError,
+    TemplateView,
+    apply_template,
+    builtin_templates,
+    check_coverage,
+    check_template,
+)
 
 app = typer.Typer(no_args_is_help=True, help="FM Scout backend commands.")
 sync_app = typer.Typer(no_args_is_help=True, help="Fetch PitchAPI data into the local databases.")
@@ -87,6 +96,7 @@ EXPECTED_ERRORS = (
     PitchApiError,
     AggregateError,
     DepthReportError,
+    TemplateError,
 )
 
 OfflineOption = Annotated[
@@ -261,7 +271,7 @@ def _raw_values(store: RawStore, match_id: str, player_id: str) -> dict[str, str
         row = next((r for r in rows if r.player.id == player_id), None)
         flat = row.flat_stats() if row is not None else {}
         for metric in BY_CODE.values():
-            if metric.source != "pitchapi_players":
+            if metric.source != "pitchapi_players" or metric.volume_of is not None:
                 continue
             stat = flat.get(metric.source_key)
             if stat is None:
@@ -275,7 +285,7 @@ def _raw_values(store: RawStore, match_id: str, player_id: str) -> dict[str, str
         advanced = AdvancedPayload.model_validate(advanced_record.data)
         adv_row = next((r for r in advanced.players if r.player.id == player_id), None)
         for metric in BY_CODE.values():
-            if metric.source != "pitchapi_advanced" or adv_row is None:
+            if metric.source != "pitchapi_advanced" or adv_row is None or metric.volume_of:
                 continue
             found, raw = adv_row.lookup(metric.source_key)
             out[metric.code] = ("null" if raw is None else str(raw)) if found else "(absent)"
@@ -516,7 +526,7 @@ def _format_ranked(value: float, basis: str, unit: str) -> str:
 def report_peers(
     league: Annotated[str, typer.Option(help="PitchAPI league ID, e.g. l_4WFCIZ.")],
     season: Annotated[str, typer.Option(help='Season label, e.g. "2025/2026".')],
-    role: Annotated[str, typer.Option(help="Peer role: GK, CB, FB, CM, AM, W or ST.")],
+    role: Annotated[str, typer.Option(help="Peer role: GK, CB, FB, DM, CM, AM, W or ST.")],
     metric: Annotated[str, typer.Option(help="Metric code, e.g. npxg.")],
     top: Annotated[int, typer.Option(min=0, help="How many from the top.")] = 10,
     bottom: Annotated[int, typer.Option(min=0, help="How many from the bottom.")] = 5,
@@ -594,6 +604,48 @@ def report_thresholds(
             cell = "-" if with_data == 0 else f"{ranked}/{with_data}"
             cells.append(f"{cell:>9}")
         typer.echo(f"  {row.code:<24} {row.min_attempts:>5}  " + "".join(cells))
+
+
+# --- position templates (slice 2e) -------------------------------------------------------------
+
+
+@report_app.command("templates")
+def report_templates(
+    league: Annotated[str, typer.Option(help="PitchAPI league ID, e.g. l_4WFCIZ.")],
+    season: Annotated[str, typer.Option(help='Season label, e.g. "2025/2026".')],
+) -> None:
+    """Check the built-in position templates against the registry and a real season: errors,
+    and metrics on which fewer than half of the peer group is ranked. Read-only."""
+    try:
+        templates = builtin_templates()
+        with _read_engine() as engine, Session(engine) as session:
+            groups, rows = metric_coverage(session, _scope_id(session, league, season))
+    except EXPECTED_ERRORS as exc:
+        raise _fail(exc) from exc
+    sizes = {g.peer_role: g.size for g in groups}
+    clean = True
+    for role in PEER_ROLES:
+        template = templates.get(role)
+        if template is None:
+            typer.secho(f"  {role:<3} no built-in template", fg="red")
+            clean = False
+            continue
+        findings = check_template(template) + check_coverage(template, groups, rows)
+        sections = " · ".join(f"{s.name} {len(s.metrics)}" for s in template.sections)
+        typer.echo(
+            f"  {role:<3} {template.label} · {len(template.codes)} metrics ({sections}) · "
+            f"group {sizes.get(role, 0)}"
+        )
+        for finding in findings:
+            clean = False
+            typer.secho(
+                f"      {finding.severity}: {finding.message}",
+                fg="red" if finding.severity == "error" else "yellow",
+            )
+    for unknown in sorted(set(templates) - set(PEER_ROLES)):
+        clean = False
+        typer.secho(f"  {unknown}: a template for an unknown peer role", fg="red")
+    typer.echo("  all templates pass" if clean else "  see the findings above")
 
 
 # --- midfield depth (slice 2d-2, 2d-2b) ----------------------------------------------------------
@@ -932,7 +984,7 @@ def _six_or_eight(detail: PlayerSeason) -> str | None:
     return text
 
 
-def _print_player_season(detail: PlayerSeason) -> None:
+def _print_player_season(detail: PlayerSeason, view: TemplateView | None = None) -> None:
     typer.echo(f"{detail.name} ({detail.external_id}) · {detail.competition} {detail.season}")
     teams = ", ".join(f"{name} {minutes} min" for name, minutes, _ in detail.teams)
     typer.echo(
@@ -944,12 +996,12 @@ def _print_player_season(detail: PlayerSeason) -> None:
         via = "most minutes as a starter" if detail.role_source == "starts" else "listed position"
         role = f"{detail.primary_role or '?'} (from {via}) · peer group {detail.peer_role}"
     typer.echo(f"  role: {role}")
-    split = _six_or_eight(detail)
-    if split is not None:
-        typer.echo(f"  6 or 8: {split}")
     if detail.roles:
         breakdown = ", ".join(f"{r} {m} min / {n} starts" for r, m, n in detail.roles)
         typer.echo(f"    as a starter: {breakdown}")
+    split = _six_or_eight(detail)
+    if split is not None:
+        typer.echo(f"  6 or 8: {split}")
     rating = "not rated" if detail.avg_rating is None else f"{detail.avg_rating:.2f}"
     typer.echo(f"  rating: {rating} ({detail.rated_matches} rated matches)")
     if detail.group is not None:
@@ -967,20 +1019,62 @@ def _print_player_season(detail: PlayerSeason) -> None:
         )
         typer.echo(f"  percentiles: not ranked ({why}); a comparison can still rank him by hand")
     typer.echo("")
-    typer.echo(
-        f"  {'metric':<28} {'total':<16} {'per 90 / rate':<14} {'minutes':>7} {'matches':>7}"
-        f"  {'percentile':<14}"
+    if view is None:
+        typer.echo(_STAT_HEADER)
+        for line in detail.stats:
+            typer.echo(_stat_row(line, detail))
+        return
+    _print_template(view, detail)
+
+
+_STAT_HEADER: Final = (
+    f"  {'metric':<28} {'total':<16} {'per 90 / rate':<14} {'minutes':>7} {'matches':>7}"
+    f"  {'percentile':<14}"
+)
+
+
+def _metric_name(code: str, is_model_output: bool, direction: str) -> str:
+    return f"{code}{' (model)' if is_model_output else ''}{_DIRECTION_MARK.get(direction, '')}"
+
+
+def _stat_row(line: SeasonStatLine, detail: PlayerSeason) -> str:
+    total, value = _season_value(line)
+    name = _metric_name(line.code, line.is_model_output, line.direction)
+    return (
+        f"  {name:<28} {total:<16} {value:<14} {line.minutes:>7} {line.matches:>7}"
+        f"  {_pct_cell(line, detail):<14}"
     )
-    for line in detail.stats:
-        total, value = _season_value(line)
-        name = (
-            f"{line.code}{' (model)' if line.is_model_output else ''}"
-            f"{_DIRECTION_MARK.get(line.direction, '')}"
+
+
+def _print_template(view: TemplateView, detail: PlayerSeason) -> None:
+    """A player's season through a position template: the radar's data, as text."""
+    template = view.template
+    typer.echo(
+        f"  template: {template.label} ({template.peer_role}) · {len(template.codes)} metrics"
+    )
+    if not view.same_group:
+        own = detail.peer_role or "none"
+        typer.secho(
+            f"  his peer group is {own}, not {template.peer_role}: the percentiles below are "
+            f"against his own group",
+            fg="yellow",
         )
-        typer.echo(
-            f"  {name:<28} {total:<16} {value:<14} {line.minutes:>7} {line.matches:>7}"
-            f"  {_pct_cell(line, detail):<14}"
-        )
+    typer.echo(_STAT_HEADER)
+    for name, rows in view.sections:
+        typer.echo(f"  {name}")
+        for row in rows:
+            if row.line is not None:
+                line = row.line
+                cell = _pct_cell(line, detail) if row.pct is not None else row.reason or ""
+                total, value = _season_value(line)
+                label = _metric_name(row.code, row.is_model_output, row.direction)
+                typer.echo(
+                    f"    {label:<26} {total:<16} {value:<14} {line.minutes:>7} "
+                    f"{line.matches:>7}  {cell}"
+                )
+            else:
+                label = _metric_name(row.code, row.is_model_output, row.direction)
+                typer.echo(f"    {label:<26} {row.reason}")
 
 
 @inspect_app.command("player")
@@ -997,8 +1091,14 @@ def inspect_player(
     matches: Annotated[
         bool, typer.Option(help="With one --metric: list every match's stored value.")
     ] = False,
+    template: Annotated[
+        bool,
+        typer.Option(help="Show his position template's metrics in sections (the radar's data)."),
+    ] = False,
 ) -> None:
     """A player's season: minutes, role, rating, and every metric's total, per 90 and rate."""
+    if template and (metric or matches):
+        raise _fail(SyncError("--template can't be combined with --metric or --matches"))
     unknown = [code for code in metric or [] if code not in BY_CODE]
     if unknown:
         raise _fail(SyncError(f"unknown metric code(s): {', '.join(unknown)}"))
@@ -1019,8 +1119,10 @@ def inspect_player(
                     typer.echo(f"  {p.external_id}  {p.name} ({p.minutes} min)")
                 raise typer.Exit(code=1)
             detail = player_season(session, scope.id, found[0].player_id)
+            # A volume metric isn't stored per match: show its parent's stored values.
+            stored_code = (BY_CODE[metric[0]].volume_of or metric[0]) if metric else ""
             by_match = (
-                metric_by_match(session, season_row.id, found[0].player_id, metric[0])
+                metric_by_match(session, season_row.id, found[0].player_id, stored_code)
                 if matches and metric
                 else []
             )
@@ -1030,10 +1132,17 @@ def inspect_player(
         raise _fail(SyncError("no aggregates for this player yet: run `scouting aggregate`"))
     if metric:
         detail = replace(detail, stats=[s for s in detail.stats if s.code in metric])
-    _print_player_season(detail)
+    view = None
+    if template:
+        if detail.peer_role is None:
+            raise _fail(SyncError("he has no peer role, so no position template applies"))
+        view = apply_template(detail, builtin_templates()[detail.peer_role])
+    _print_player_season(detail, view)
     if by_match:
         typer.echo("")
-        typer.echo(f"  {metric[0] if metric else ''} by match (stored values):")
+        asked = metric[0] if metric else stored_code
+        via = "" if stored_code == asked else f", from {stored_code}"
+        typer.echo(f"  {asked} by match (stored values{via}):")
         for row in by_match:
             value = _format_number(row.value)
             if row.denominator is not None:

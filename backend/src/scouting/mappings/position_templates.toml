@@ -1,0 +1,178 @@
+# Built-in position templates (slice 2e, D-015, D-019): one per peer role.
+#
+# Each template is about 12 metric codes in sections; they drive the radar, the comparison
+# presets and the FM metric wishlist. Codes come from scouting.metrics.registry. Process
+# metrics only: outcomes (goals, assists, GCA, ...) are shown elsewhere on the player page.
+# Metrics picked by the user from claude/TEMPLATE_OPTIONS.md on 2026-11-21.
+#
+# `scouting report templates` checks these against the registry and a real season;
+# tests/unit/metrics/test_templates.py fails on any error or warning.
+
+[GK]
+label = "Goalkeeper"
+
+[[GK.sections]]
+name = "Shot-stopping"
+metrics = ["goals_prevented", "saves"]
+
+[[GK.sections]]
+name = "Box"
+metrics = ["claims_won", "high_claims", "punches"]
+
+[[GK.sections]]
+name = "Sweeping"
+metrics = ["sweeper_actions"]
+
+[[GK.sections]]
+name = "Distribution"
+metrics = ["distribution_accuracy", "progressive_passes"]
+
+
+[CB]
+label = "Centre-back"
+
+[[CB.sections]]
+name = "Defending"
+metrics = ["tackles", "interceptions", "clearances", "shot_blocks", "dribbled_past"]
+
+[[CB.sections]]
+name = "Duels"
+metrics = ["ground_duels_won", "aerials_won", "aerials_won_count"]
+
+[[CB.sections]]
+name = "Passing"
+metrics = ["passes_completed", "long_balls_completed", "progressive_passes"]
+
+[[CB.sections]]
+name = "Carrying"
+metrics = ["progressive_carries"]
+
+
+[FB]
+label = "Full-back"
+
+[[FB.sections]]
+name = "Defending"
+metrics = ["tackles", "interceptions", "recoveries", "dribbled_past", "ground_duels_won"]
+
+[[FB.sections]]
+name = "Progression"
+metrics = ["progressive_carries", "progressive_passes"]
+
+[[FB.sections]]
+name = "Creation"
+metrics = [
+    "chances_created", "xa", "crosses_completed_count", "crosses_completed", "passes_into_box",
+]
+
+
+[DM]
+label = "Defensive midfielder (6)"
+
+[[DM.sections]]
+name = "Ball-winning"
+metrics = [
+    "tackles", "interceptions", "recoveries", "ground_duels_won", "aerials_won", "dribbled_past",
+]
+
+[[DM.sections]]
+name = "Distribution"
+metrics = [
+    "passes_completed", "long_balls_completed", "progressive_passes", "passes_final_third",
+    "xg_buildup",
+]
+
+[[DM.sections]]
+name = "Security"
+metrics = ["dispossessed"]
+
+
+[CM]
+label = "Central midfielder (8)"
+
+[[CM.sections]]
+name = "Progression"
+metrics = ["progressive_passes", "progressive_carries", "passes_final_third"]
+
+[[CM.sections]]
+name = "Creation"
+metrics = ["chances_created", "xa", "passes_into_box"]
+
+[[CM.sections]]
+name = "Box arrivals"
+metrics = ["npxg", "touches_opp_box"]
+
+[[CM.sections]]
+name = "Defending"
+metrics = ["tackles", "recoveries", "interceptions"]
+
+[[CM.sections]]
+name = "Security"
+metrics = ["passes_completed"]
+
+
+[AM]
+label = "Attacking midfielder (10)"
+
+[[AM.sections]]
+name = "Shooting"
+metrics = ["npxg", "touches_opp_box"]
+
+[[AM.sections]]
+name = "Creation"
+metrics = ["chances_created", "xa", "through_balls", "passes_into_box", "big_chances_created"]
+
+[[AM.sections]]
+name = "Carrying"
+metrics = ["progressive_carries", "dribbles_completed_count", "xt"]
+
+[[AM.sections]]
+name = "Out of possession"
+metrics = ["recoveries"]
+
+[[AM.sections]]
+name = "Security"
+metrics = ["dispossessed"]
+
+
+# Deliberately attacking: no out-of-possession section (user, 2026-11-21).
+[W]
+label = "Winger"
+
+[[W.sections]]
+name = "Shooting"
+metrics = ["npxg", "shots", "touches_opp_box"]
+
+[[W.sections]]
+name = "Creation"
+metrics = [
+    "xa", "chances_created", "passes_into_box", "crosses_completed_count", "crosses_completed",
+]
+
+[[W.sections]]
+name = "1v1 & carrying"
+metrics = [
+    "dribbles_completed_count", "dribbles_completed", "progressive_carries", "carries_into_box",
+]
+
+
+# xgot includes penalties and defensive_actions is PitchAPI's own count; both accepted
+# (check_2e, 2026-11-21).
+[ST]
+label = "Striker"
+
+[[ST.sections]]
+name = "Shooting"
+metrics = ["npxg", "shots", "touches_opp_box", "xgot"]
+
+[[ST.sections]]
+name = "Link-up"
+metrics = ["xa", "chances_created", "sca", "passes_completed", "miscontrols"]
+
+[[ST.sections]]
+name = "Aerial"
+metrics = ["aerials_won", "aerials_won_count"]
+
+[[ST.sections]]
+name = "Pressing"
+metrics = ["defensive_actions"]
