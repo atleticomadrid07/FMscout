@@ -9,6 +9,7 @@ from typing import Any, Final
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -64,3 +65,30 @@ SCOPED_ERROR_RESPONSES: Final[dict[int | str, dict[str, Any]]] = {
     **ERROR_RESPONSES,
     409: {"model": ErrorResponse, "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"},
 }
+
+
+def install_openapi(app: FastAPI) -> None:
+    """The OpenAPI document as the API actually behaves: FastAPI lists a 422 on every route
+    with parameters, but request validation errors are answered as 400 BAD_REQUEST in the
+    error envelope (see the handlers above). Dropping the 422s keeps the contract honest for
+    the TypeScript types generated from it (Phase 4)."""
+
+    def openapi() -> dict[str, Any]:
+        if app.openapi_schema is not None:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            summary=app.summary,
+            routes=app.routes,
+        )
+        for path in schema.get("paths", {}).values():
+            for operation in path.values():
+                operation.get("responses", {}).pop("422", None)
+        components = schema.get("components", {}).get("schemas", {})
+        for name in ("HTTPValidationError", "ValidationError"):
+            components.pop(name, None)
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = openapi  # type: ignore[method-assign]

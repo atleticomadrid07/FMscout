@@ -620,19 +620,6 @@
         "title": "GroupViewOut",
         "type": "object"
       },
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "title": "Detail",
-            "type": "array"
-          }
-        },
-        "title": "HTTPValidationError",
-        "type": "object"
-      },
       "Health": {
         "properties": {
           "api_version": {
@@ -1981,46 +1968,6 @@
         ],
         "title": "TemplatesOut",
         "type": "object"
-      },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError",
-        "type": "object"
       }
     }
   },
@@ -2173,16 +2120,6 @@
             },
             "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
           },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
           "503": {
             "content": {
               "application/json": {
@@ -2322,16 +2259,6 @@
             },
             "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
           },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
           "503": {
             "content": {
               "application/json": {
@@ -2467,16 +2394,6 @@
               }
             },
             "description": "Not found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           },
           "503": {
             "content": {
@@ -2625,16 +2542,6 @@
             },
             "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
           },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
           "503": {
             "content": {
               "application/json": {
@@ -2718,16 +2625,6 @@
               }
             },
             "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           },
           "503": {
             "content": {
@@ -2823,16 +2720,6 @@
               }
             },
             "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           },
           "503": {
             "content": {
@@ -2955,16 +2842,6 @@
             },
             "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
           },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
           "503": {
             "content": {
               "application/json": {
@@ -3086,16 +2963,6 @@
             },
             "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
           },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
           "503": {
             "content": {
               "application/json": {
@@ -3209,16 +3076,6 @@
               }
             },
             "description": "Not found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           },
           "503": {
             "content": {
@@ -3334,16 +3191,6 @@
               }
             },
             "description": "Not found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           },
           "503": {
             "content": {

@@ -171,6 +171,15 @@ def test_cors_allows_the_vite_dev_server_only(client: TestClient) -> None:
     assert "access-control-allow-origin" not in other.headers
 
 
+def test_openapi_lists_400_not_422() -> None:
+    """Validation errors come back as 400 BAD_REQUEST, so the contract says so (slice 3e)."""
+    schema = create_app("sqlite:///:memory:").openapi()
+    operations = [op for path in schema["paths"].values() for op in path.values()]
+    assert operations and all("422" not in op["responses"] for op in operations)
+    assert all("400" in op["responses"] for op in operations if op.get("parameters"))
+    assert "HTTPValidationError" not in schema["components"]["schemas"]
+
+
 def test_openapi_snapshot() -> None:
     """The contract. If this fails after a deliberate API change, regenerate it with
     UPDATE_OPENAPI=1 uv run pytest tests/unit/api/test_api_meta.py -k openapi
