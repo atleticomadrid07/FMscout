@@ -5,7 +5,7 @@ A scouting and comparison tool with two modes that share one core:
 - **Real-world scouting.** Search players and teams, view their stats in several layouts, chart them (radar, bars, scatter), and compare players on metrics you choose. Percentiles are always computed against an explicit peer group.
 - **Football Manager scouting.** Import an FM24 `.rtf` player-view export, then compare FM players with each other, or with real-world players through an explicit comparability layer.
 
-> **Status: Phase 2 done (2026-11-21); Phase 3 (backend API) is next.** The backend crawls PitchAPI, stores one season (EPL 2025/26), builds season aggregates, peer groups (with 6s and 8s split by heatmap depth), percentiles and position templates, all from a command-line tool. There's no web API or UI yet. The roadmap is in [`docs/PLAN.md`](docs/PLAN.md) and the reasoning behind decisions is in [`DECISIONS.md`](DECISIONS.md).
+> **Status: Phase 3 done (2026-11-22); Phase 4 (MVP UI) is next.** The backend crawls PitchAPI, stores one season (EPL 2025/26), builds season aggregates, peer groups (with 6s and 8s split by heatmap depth), percentiles and position templates, and serves them through a read-only local API (search, player pages, radars, peer groups, comparisons). There's no UI yet. The roadmap is in [`docs/PLAN.md`](docs/PLAN.md) and the reasoning behind decisions is in [`DECISIONS.md`](DECISIONS.md).
 
 ---
 
@@ -22,6 +22,7 @@ A scouting and comparison tool with two modes that share one core:
 - [Position templates](#position-templates)
 - [Inspecting and reporting](#inspecting-and-reporting)
 - [When to re-run what](#when-to-re-run-what)
+- [Using the API](#using-the-api)
 - [Tests and checks](#tests-and-checks)
 - [Data principles](#data-principles)
 - [Roadmap](#roadmap)
@@ -33,9 +34,9 @@ A scouting and comparison tool with two modes that share one core:
 ## Features
 
 ### MVP (real-world, top 5 leagues)
-- [ ] Fuzzy player search that handles accents and abbreviations (`E. Haaland`, `Odegaard`), filterable by league, season, team, position and minutes
+- [ ] Fuzzy player search that handles accents and abbreviations (`E. Haaland`, `Odegaard`), filterable by league, season, team, position and minutes (API done; the UI comes in Phase 4)
 - [ ] Player page: summary card, full stat table, per-90/totals toggle, season selector
-- [ ] Percentile radar using position-specific metric templates (templates and their data: done; the chart comes in Phase 4)
+- [ ] Percentile radar using position-specific metric templates (templates and the API: done; the chart comes in Phase 4)
 - [ ] Bar charts and a scatterplot of any two metrics, with peer-group context and labeled outliers
 - [ ] Comparison of 2+ players, with preset metric packages per position
 
@@ -79,10 +80,11 @@ PitchAPI has no player search and no season totals, because its data is match-le
 
 | Layer | Choice |
 |---|---|
-| Backend | Python 3.12, [uv](https://docs.astral.sh/uv/), Pydantic v2 (FastAPI from Phase 3) |
+| Backend | Python 3.12, [uv](https://docs.astral.sh/uv/), Pydantic v2 |
+| API | FastAPI + uvicorn, read-only, local only (`scouting serve`) |
 | Database | SQLite with SQLAlchemy 2.1 + Alembic (schema stays portable to Postgres); `raw.db` with stdlib `sqlite3` |
 | Stats | SQL aggregation + plain Python percentiles |
-| Search | SQLite FTS5 + rapidfuzz + unidecode (Phase 3; name-fragment lookup for now) |
+| Search | rapidfuzz + unidecode, an in-memory index per season |
 | Sync jobs | Typer CLI `scouting` |
 | Config files | TOML (position templates now; the FM header map in Phase 6) |
 | Frontend | Vite + React + TypeScript (strict), TanStack Query (Phase 4) |
@@ -105,6 +107,7 @@ Layer rules and dependency rules are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTU
 │   │   ├── ingest/        # Layer 2: match list, match detail, season sync, profiles
 │   │   ├── metrics/       # Layer 3: registry, aggregation, 6/8 depth split, percentiles, templates
 │   │   ├── mappings/      # TOML: position templates (FM header map, comparability later)
+│   │   ├── api/           # Layer 4: FastAPI app, routes, response models, search
 │   │   └── cli/           # Typer entry points
 │   ├── migrations/        # Alembic
 │   ├── scripts/           # Read-only data checks and one-off reports
@@ -221,6 +224,46 @@ Read-only scripts in `backend/scripts/` (`check_2c.py`, `check_2e.py`, `template
 
 On SQLite, use plain string server defaults and never add or change a CHECK on a table other tables reference: the rebuild fails (ERRORS.md). Derived tables can be dropped and recreated instead.
 
+## Using the API
+
+```bash
+uv run scouting serve
+```
+
+The API runs on `http://127.0.0.1:8000/api/v1` (localhost only). **The full reference is generated from the code at [`/docs`](http://127.0.0.1:8000/docs)**: every endpoint, parameter and response field, with a "Try it out" button. The API only reads `scouting.db` (opened read-only) and never calls PitchAPI. After `scouting aggregate` there's nothing to restart; after a migration, restart it.
+
+**Concepts**
+- **Scope key:** every data endpoint takes `scope=`, one league-season, e.g. `l_4WFCIZ.2025-2026` (listed by `/scopes`). Players are addressed by their PitchAPI ID (`p_1reWwN`).
+- **Null is not zero:** `null` means no data; per-match lists keep appearances without data as `null`.
+- **Percentiles** are 0–100 within a peer group, stored raw (low value = low percentile; use `direction` to flip lower-is-better metrics). Every one comes with the group (`role`, `size`, `min_minutes`, `small_sample`) and `ranked_among`; a missing one comes with a `reason`.
+- **`rate_scale`:** success rates are a 0–1 share; averaged keeper rates are percent (0–100) or metres.
+- **`min_minutes=`** (90 or more) ranks within a group at another threshold, computed per request: responses say `stored: false`.
+- **`outside_group: true`** (in `/compare`): the player is ranked against a group he isn't in (another role, or under its minutes) without being added to it, so nobody else's percentile changes.
+
+**Endpoints** (all `GET`)
+
+| Endpoint | What it returns |
+|---|---|
+| `/health` | Status and schema version |
+| `/scopes`, `/scopes/{key}` | Seasons available, with coverage and peer groups |
+| `/metrics`, `/metrics/{code}` | The metric registry |
+| `/templates`, `/templates/{id}` | The position templates |
+| `/players/search?q=` | Fuzzy name search (accents, initials), filters `team`, `role`, `min_minutes` |
+| `/players/{id}` | Player card: teams, roles, 6/8 split, rating, peer group, coverage |
+| `/players/{id}/stats` | Full stat table (or `metrics=a,b`) |
+| `/players/{id}/matches?metric=` | One metric per appearance, for form and trend lines |
+| `/players/{id}/template` | Radar data through his position template (or `template=ST`) |
+| `/groups/{role}` | Every member of a peer group on chosen metrics, for rankings, bars and scatters |
+| `/compare?players=a,b` | 2–6 players side by side, each in his own group or all `against=ROLE` |
+
+**Errors** use one shape, `{"error": {"code": "PLAYER_NOT_FOUND", "message": "…"}}`; branch on `code`. Bad parameters are `400 BAD_REQUEST`; a season without aggregates is `409 SCOPE_NOT_AGGREGATED`; an out-of-date database is `503 SCHEMA_OUT_OF_DATE`.
+
+**The contract** is the committed OpenAPI file `backend/tests/unit/api/openapi.json`; a test fails when the API changes shape. After a deliberate change, regenerate it and review the diff:
+
+```bash
+UPDATE_OPENAPI=1 uv run pytest tests/unit/api/test_api_meta.py -k openapi
+```
+
 ## Tests and checks
 
 ```bash
@@ -248,8 +291,8 @@ The tests use a hand-made three-match fixture season (`tests/fixtures/pitchapi/`
 | 0 | Spike + foundations | Done |
 | 1 | Ingestion slice: EPL, one season | Done |
 | 2 | Aggregation + metric/percentile engine, 6/8 split, position templates | Done |
-| 3 | Backend API | Next |
-| 4 | **MVP UI** | |
+| 3 | Backend API | Done |
+| 4 | **MVP UI** | Next |
 | 5 | More leagues and seasons, coverage, team pages | |
 | 6 | FM24 `.rtf` import | |
 | 7 | FM ↔ real-world comparability | |
