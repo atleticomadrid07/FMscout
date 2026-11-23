@@ -248,12 +248,31 @@ def missing_reason(line: SeasonStatLine | None, season: PlayerSeason) -> str:
         return f"not ranked: below {threshold} min" if threshold is not None else "not ranked"
     if line is None:
         return "no data"
-    if line.kind == "fraction":
-        if line.min_attempts is not None and (line.denominator or 0) < line.min_attempts:
-            return f"needs {line.min_attempts} attempts (has {int(line.denominator or 0)})"
+    return stat_reason(
+        is_fraction=line.kind == "fraction",
+        min_attempts=line.min_attempts,
+        attempts=line.denominator,
+        minutes=line.minutes,
+        group_min_minutes=season.group.min_minutes,
+    )
+
+
+def stat_reason(
+    *,
+    is_fraction: bool,
+    min_attempts: int | None,
+    attempts: float | None,
+    minutes: int,
+    group_min_minutes: int,
+) -> str:
+    """Why a member of a peer group has no percentile for a metric he has data for
+    (the eligibility rules of metrics.percentiles)."""
+    if is_fraction:
+        if min_attempts is not None and (attempts or 0) < min_attempts:
+            return f"needs {min_attempts} attempts (has {int(attempts or 0)})"
         return "no attempts"
-    if line.minutes < season.group.min_minutes:
-        return f"{line.minutes} min with data (needs {season.group.min_minutes})"
+    if minutes < group_min_minutes:
+        return f"{minutes} min with data (needs {group_min_minutes})"
     return "not ranked"
 
 

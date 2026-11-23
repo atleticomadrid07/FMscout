@@ -1,6 +1,6 @@
 # MEMORY.md: session log
 
-**For a full briefing in a new chat, read CONTEXT.md first, then the newest session below** (it may be ahead of CONTEXT/PLAN, which are updated at decision points). Decisions and their reasons are in DECISIONS.md; the data model is in SCHEMA.md; phase status is in PLAN.md; PitchAPI facts are in PITCHAPI_NOTES.md; past mistakes are in ERRORS.md.
+**For a full briefing in a new chat, read CONTEXT.md first, then the newest session below** (it may be ahead of CONTEXT/PLAN, which are updated at decision points). Decisions and their reasons are in DECISIONS.md; the data model is in SCHEMA.md; phase status is in PLAN.md; the API design is in PHASE3_API.md; PitchAPI facts are in PITCHAPI_NOTES.md; past mistakes are in ERRORS.md.
 
 ## Session 2026-11-18 → 2026-11-20 (Phases 0, 1 and most of 2)
 
@@ -13,16 +13,40 @@
 
 ## Session 2026-11-21: slices 2d (D-017, D-018) and 2e (D-019) — PHASE 2 DONE
 
-- **2d:** heatmap depth, `report depth`, 6/8 classification (CB reference, 14 m cut, deeper partner ≥ 2 m, single-pivot fallback), DM peer group. User's migration IDs: heatmap depth `5019ed9e4215`, dm peer role `2f97036a9459`.
-- **2e:** `template_options.py` + `claude/TEMPLATE_OPTIONS.md`; decisions A–E; 5 derived volume metrics; outcome flag; pass minimum 100; `check_2e.py` (xGOT includes penalties; defensive_actions ≈ 5 parts in 68%); `position_templates.toml` (TOML chosen) + `metrics/templates.py` foundations; `inspect player --template`, `report templates` (all pass).
-- **Close-out (17:56):** README rewritten (repo root), exact-name player lookup ("rodri" → Rodri), "6 or 8" after the starts breakdown; **two offline rebuilds → identical checksums**. Final: groups GK 25 · CB 67 · FB 62 · DM 28 · CM 48 · AM 17 · W 65 · ST 33; 26,693 percentiles; 554 tests on the user's machine.
-- **Docs batch written (after 17:56):** DECISIONS (D-019), PLAN (Phase 2 done), SCHEMA, CONTEXT. TEMPLATE_OPTIONS left as the history of the picks (the TOML is authoritative; noted in D-019 and CONTEXT).
-- **Next: Phase 3 (backend API), plan first.** Open questions for the plan are listed in CONTEXT §3 and PLAN.
+- Final: groups GK 25 · CB 67 · FB 62 · DM 28 · CM 48 · AM 17 · W 65 · ST 33; 26,693 percentiles; two offline rebuilds → identical checksums; 554 tests on the user's machine. Docs batch written (DECISIONS D-019, PLAN, SCHEMA, CONTEXT).
+- User's migration IDs: heatmap depth `5019ed9e4215`, dm peer role `2f97036a9459`.
 
-**Process notes:** run `ruff format` only on changed files. Import `metrics.depth` as a module in the CLI; defaults that tests patch must be read at call time. The alembic post-write ruff hook strips unused `sa`/`op` imports from an empty revision; send paste text as `.txt`. Ruff flags `×` (RUF001/RUF003) and SIM300 (`const <= set(...)`). `Result.tuples()` is deprecated in SQLAlchemy 2.1. The fixture season has no CB/DM/CM/AM groups; its lineups have no second DM; at the 100-pass minimum one fixture full-back qualifies. The short-name lookup isn't accent-insensitive (Phase 3 search fixes it).
+## Session 2026-11-21/22: Phase 3 (backend API), slices 3a–3d
+
+- **Design** `claude/PHASE3_API.md` (2026-11-21); the user's "go on 3a" (2026-11-22) taken as all six recommendations.
+- **3a built and verified** (skeleton, read-only engine, error envelope, scopes, metrics, templates, `scouting serve`, OpenAPI snapshot).
+- **3b built (`slice_3b.zip`) and verified on EPL data (2026-11-22 14:07):** search, card, stats, per-match values; details in D-020 and PHASE3_API §8.
+- **User (14:09): "we can sort out search scoring later -> let's update the various docs right now".** Search fuzzy-noise tuning → PLAN backlog. **Docs batch written** (D-020, PLAN, CONTEXT, PHASE3_API, ERRORS +3, MEMORY). Docs not yet updated for 3c/3d (do at 3e or when asked).
+- **3c built (`slice_3c.zip`) and VERIFIED (2026-11-22 21:05, all tests passed):**
+  - `GET /players/{id}/template?scope=&template=` (id `builtin:W` or role `W`; default his peer role's; rows = `StatLineOut`; `same_group` false for another position; `UNKNOWN_TEMPLATE` 404, `TEMPLATE_REQUIRED` 400).
+  - `GET /groups/{role}?scope=&metrics=&sort=` (stored group members; default metrics = role template; max 14; values dict per player; sorted best first respecting direction, nulls last; `GROUP_NOT_FOUND` 404).
+  - Refactors: `api/mapping.py`; `metrics/templates.stat_reason`; `db/queries.group_view`.
+  - Real-data check: Salah's W radar = `inspect player --template` on all 12 metrics; `/groups/W?metrics=npxg,xa` top 10 = `report peers` (Brooks 0.4376 99.2 … Okafor 0.3019 85.4); `template=ST` → `same_group: False`, group W.
+- **3d decisions (user, 2026-11-22 21:14):**
+  - **A: default metrics = the first listed player's position template** ("the user can always change to the second player's … once UI is implemented: better than requiring or error"). Claude had switched its recommendation to "shared position's template, else error"; the user chose first-player.
+  - **B: a player outside the group he's ranked against is ranked against the group's members only, never added** ("I don't want statistics being skewed if say, eventually a FM player is added with bananas stats"). Still needs the metric's min attempts on rates; per-90s need MIN_MINUTES_FLOOR (90) exposure, capped at the group's own threshold.
+  - **C: `min_minutes` on `/stats`, `/template`, `/groups`, `/compare`.** **D: minimum 90** ("most people won't be ranking players who have less than one full game played").
+- **3d BUILT and delivered (`slice_3d.zip`, 14 files, no migration; 2026-11-22 ~21:40):**
+  - `metrics/percentiles.py`: public `eligible_value(...)` (the stored eligibility rules; `_eligible_value` wraps it), `MIN_MINUTES_FLOOR = 90`, `LiveGroup` (members, sorted populations per metric code, `rank(code, value)` = midpoint against the members' eligible values) and `live_group(session, scope_id, role, min_minutes, codes)`.
+  - `api/ranking.py`: `custom_threshold(scope, M)` (None = stored; also when M equals the stored threshold), `season_at(...)` (PlayerSeason re-ranked at M in his own group; below M → group None, "not ranked: below M min"), `rank_in(line, group, member=)` → `Ranked(pct, ranked_among, reason)`.
+  - `GET /compare?scope=&players=a,b[,…6]&metrics=|template=&against=&min_minutes=`: own group per player (or all `against`); `outside_group` flag; group = the one ranked against (size at the threshold); values: value, total, attempts, minutes, pct, ranked_among, reason; `template` echoed or null; `min_minutes`, `stored`. Errors: 2–6 unique players (400), metrics+template both (400), `UNKNOWN_ROLE`, `TEMPLATE_REQUIRED` (first player has no role and no metrics/template), `UNKNOWN_TEMPLATE`, `UNKNOWN_METRIC`, player errors, 409. A role with no players at M → group null, reason "no GK players with at least M min".
+  - `min_minutes` (Query ge=90) on `/stats`, `/template`, `/groups` (`group.stored: false`); `db.queries.group_view(..., min_minutes)` filters members by M and leaves pct for the route (`routes/groups.ranked_live`). `MAX_METRICS` moved to `api/mapping.py`; `find_template` moved there too.
+  - Tests: `tests/unit/metrics/test_live_percentiles.py` (4; **live_group at the stored threshold reproduces every stored percentile and the per-metric eligible counts**), `tests/unit/api/test_api_compare.py` (14), checksum test covers compare/custom thresholds, snapshot regenerated. 620 passed + 12 skipped in Claude's workspace → the user should see **632**.
+  - Known limit: on a season in progress whose stored threshold is below 90, passing that exact value explicitly is rejected (ge=90); omitting `min_minutes` uses it.
+- **Waiting for the user's run:** pytest, compare two wingers + a striker `against=W`, `min_minutes=600` on `/groups/W`.
+- **Then 3e:** close-out (README API section, D-020 completed with 3c/3d, PLAN/CONTEXT/PHASE3_API updates, final snapshot; maybe the 422 cosmetic fix).
+
+**Process notes:** run `ruff format` only on changed files. Tests run with `--import-mode=importlib` and no `__init__.py`: one `conftest.py`, test modules never import each other (ERRORS.md). Import `metrics.depth` as a module in the CLI; defaults that tests patch must be read at call time. The alembic post-write ruff hook strips unused imports from an empty revision; send paste text as `.txt`. `Result.tuples()` is deprecated in SQLAlchemy 2.1. Workspace: `UV_NATIVE_TLS` is deprecated, use `UV_SYSTEM_CERTS=1`; `ruff check --fix src/scouting` also "fixes" the user's `settings.py` W292 — keep that file as the user has it (never ship it).
 
 ## How the user works (summary; full list in CONTEXT.md §7)
 
 - Plan before code; options with a recommendation; wait for "go". "Walk me through / talk me through" = design discussion only.
 - One zip per approved step, each explained; the user generates and runs migrations.
 - Terminal steps: one block per step, no `#` comments, no `<placeholders>` (zsh); give expected results.
+- Defers things explicitly ("later") — put them in the backlog and don't push them.
+- Answers to a decision list count as the go-ahead for that slice.

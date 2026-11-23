@@ -61,17 +61,39 @@ class _Eligible:
     value: float
 
 
-def _eligible_value(stat: PlayerScopeStat, metric: Metric, min_minutes: int) -> float | None:
-    """The value this player is ranked on for this metric, or None if he isn't eligible."""
-    if metric.aggregation == "rate_from_sums":
-        if stat.rate is None or stat.denominator is None:
+def eligible_value(
+    *,
+    is_fraction: bool,
+    rate: float | None,
+    per90: float | None,
+    denominator: float | None,
+    minutes: int,
+    min_attempts: int | None,
+    min_minutes: int,
+) -> float | None:
+    """The value a player is ranked on for a metric, or None if he isn't eligible: a rate
+    needs the metric's minimum attempts, a per-90 the minimum minutes on its own exposure."""
+    if is_fraction:
+        if rate is None or denominator is None:
             return None
-        if metric.min_attempts is not None and stat.denominator < metric.min_attempts:
+        if min_attempts is not None and denominator < min_attempts:
             return None
-        return stat.rate
-    if stat.per90 is None or stat.minutes < min_minutes:
+        return rate
+    if per90 is None or minutes < min_minutes:
         return None
-    return stat.per90
+    return per90
+
+
+def _eligible_value(stat: PlayerScopeStat, metric: Metric, min_minutes: int) -> float | None:
+    return eligible_value(
+        is_fraction=metric.aggregation == "rate_from_sums",
+        rate=stat.rate,
+        per90=stat.per90,
+        denominator=stat.denominator,
+        minutes=stat.minutes,
+        min_attempts=metric.min_attempts,
+        min_minutes=min_minutes,
+    )
 
 
 def basis_for(metric: Metric) -> str:
@@ -175,3 +197,65 @@ def rank_against(
     if not population:
         return None
     return midpoint_percentile(value, population), len(population)
+
+
+# --- on-the-fly ranking (API slice 3d; D-020 decisions 4 and B) ---------------------------------
+
+MIN_MINUTES_FLOOR: Final = 90  # the lowest threshold the API accepts; also what a player
+# ranked from outside a group needs on a per-90 metric (one full match; user, 2026-11-22)
+
+
+@dataclass(frozen=True, slots=True)
+class LiveGroup:
+    """One peer group at any minimum minutes, with the sorted eligible values of its members
+    per metric: the same rules and formula as the stored percentiles, nothing written."""
+
+    peer_role: str
+    min_minutes: int
+    members: frozenset[int]  # player ids: the role and at least `min_minutes`
+    populations: dict[str, list[float]]  # metric code -> members' eligible values, sorted
+
+    @property
+    def size(self) -> int:
+        return len(self.members)
+
+    def rank(self, code: str, value: float) -> tuple[float, int] | None:
+        """(percentile, ranked among) of a value on a metric, against the members' eligible
+        values. A member's own value is part of that population (as when stored); a player
+        from outside is ranked against the members only and never added to them."""
+        population = self.populations.get(code)
+        if not population:
+            return None
+        return midpoint_percentile(value, population), len(population)
+
+
+def live_group(
+    session: Session, scope_id: int, peer_role: str, min_minutes: int, codes: Sequence[str]
+) -> LiveGroup:
+    """The peer group of `peer_role` at `min_minutes` on the given metrics (may be empty)."""
+    members = frozenset(
+        session.scalars(
+            select(PlayerScope.player_id).where(
+                PlayerScope.scope_id == scope_id,
+                PlayerScope.peer_role == peer_role,
+                PlayerScope.minutes >= min_minutes,
+            )
+        )
+    )
+    metrics = {m.id: m for m in session.scalars(select(Metric).where(Metric.code.in_(list(codes))))}
+    populations: dict[str, list[float]] = {m.code: [] for m in metrics.values()}
+    if members and metrics:
+        for stat in session.scalars(
+            select(PlayerScopeStat).where(
+                PlayerScopeStat.scope_id == scope_id,
+                PlayerScopeStat.player_id.in_(list(members)),
+                PlayerScopeStat.metric_id.in_(list(metrics)),
+            )
+        ):
+            metric = metrics[stat.metric_id]
+            value = _eligible_value(stat, metric, min_minutes)
+            if value is not None:
+                populations[metric.code].append(value)
+    for values in populations.values():
+        values.sort()
+    return LiveGroup(peer_role, min_minutes, members, populations)

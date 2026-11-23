@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, case, func, select
 from sqlalchemy.orm import Session, aliased
 
 from scouting.db.models import (
     Appearance,
     Competition,
+    CompetitionSourceId,
     Match,
     MatchSourceId,
     Metric,
@@ -604,3 +605,412 @@ def metric_coverage(session: Session, scope_id: int) -> tuple[list[GroupInfo], l
             )
         )
     return [GroupInfo(g.peer_role, g.size, g.min_minutes) for g in groups], rows
+
+
+# --- scopes for the API (slice 3a) -----------------------------------------------------------
+
+
+def scope_key(league_external_id: str, season_label: str) -> str:
+    """A season's public key, built from source IDs so it survives a database rebuilt from
+    scratch: "l_4WFCIZ.2025-2026" (the slash would break URL paths)."""
+    return f"{league_external_id}.{season_label.replace('/', '-')}"
+
+
+@dataclass(frozen=True, slots=True)
+class ScopeCoverage:
+    """What the season's matches have, so the UI can show gaps instead of blanks."""
+
+    matches: int
+    players_missing: int  # no /players data (the match adds no stats)
+    advanced_unavailable: int  # ANALYTICS_UNAVAILABLE: no advanced metrics for the match
+    lineups_missing: int  # no roles or starts for the match
+    heatmaps_missing: int  # no depth (the 6/8 split falls back to formations)
+    pending: int  # not synced yet in at least one part
+    matches_with_ratings: int  # 0 for a league without ratings
+
+
+@dataclass(frozen=True, slots=True)
+class ScopeSummary:
+    key: str
+    season_id: int
+    scope_id: int | None  # None: never aggregated
+    competition: str
+    country_code: str
+    season: str
+    is_current: bool
+    coverage: ScopeCoverage
+    min_minutes: int | None  # the stored percentiles' threshold; None before aggregation
+    computed_at: datetime | None  # when its aggregates' data was last normalized
+    groups: list[GroupInfo]  # peer groups at min_minutes, in PEER_ROLES order
+
+
+def scope_summaries(session: Session) -> list[ScopeSummary]:
+    """Every season in scouting.db with its coverage and peer groups, newest season first."""
+    seasons = session.execute(
+        select(Season, Competition, CompetitionSourceId.external_id)
+        .join(Competition, Competition.id == Season.competition_id)
+        .join(CompetitionSourceId, CompetitionSourceId.competition_id == Competition.id)
+        .where(CompetitionSourceId.source == SOURCE)
+        .order_by(Season.label.desc(), Competition.name)
+    ).all()
+    summaries = []
+    for season, competition, league_id in seasons:
+        min_minutes, computed_at, groups = _groups(session, season.id)
+        summaries.append(
+            ScopeSummary(
+                key=scope_key(league_id, season.label),
+                season_id=season.id,
+                scope_id=session.scalar(select(Scope.id).where(Scope.season_id == season.id)),
+                competition=competition.name,
+                country_code=competition.country_code,
+                season=season.label,
+                is_current=season.is_current,
+                coverage=_coverage(session, season.id),
+                min_minutes=min_minutes,
+                computed_at=computed_at,
+                groups=groups,
+            )
+        )
+    return summaries
+
+
+def find_scope(session: Session, key: str) -> ScopeSummary | None:
+    return next((s for s in scope_summaries(session) if s.key == key), None)
+
+
+def _count(condition: ColumnElement[bool]) -> ColumnElement[int]:
+    return func.sum(case((condition, 1), else_=0))
+
+
+def _coverage(session: Session, season_id: int) -> ScopeCoverage:
+    row = session.execute(
+        select(
+            func.count(Match.id),
+            _count(Match.players_status == "missing"),
+            _count(Match.advanced_status == "unavailable"),
+            _count(Match.lineups_status == "missing"),
+            _count(Match.heatmaps_status == "missing"),
+            _count(
+                (Match.players_status == "pending")
+                | (Match.advanced_status == "pending")
+                | (Match.lineups_status == "pending")
+                | (Match.heatmaps_status == "pending")
+            ),
+        ).where(Match.season_id == season_id)
+    ).one()
+    rated = session.scalar(
+        select(func.count(func.distinct(Appearance.match_id)))
+        .join(Match, Match.id == Appearance.match_id)
+        .where(Match.season_id == season_id, Appearance.rating.is_not(None))
+    )
+    matches, players, advanced, lineups, heatmaps, pending = (int(v or 0) for v in row)
+    return ScopeCoverage(
+        matches=matches,
+        players_missing=players,
+        advanced_unavailable=advanced,
+        lineups_missing=lineups,
+        heatmaps_missing=heatmaps,
+        pending=pending,
+        matches_with_ratings=int(rated or 0),
+    )
+
+
+def _groups(
+    session: Session, season_id: int
+) -> tuple[int | None, datetime | None, list[GroupInfo]]:
+    groups = session.scalars(
+        select(PeerGroup)
+        .join(Scope, Scope.id == PeerGroup.scope_id)
+        .where(Scope.season_id == season_id)
+    ).all()
+    if not groups:
+        return None, None, []
+    ordered = sorted(groups, key=lambda g: PEER_ROLES.index(g.peer_role))
+    return (
+        ordered[0].min_minutes,
+        max(g.computed_at for g in groups),
+        [GroupInfo(g.peer_role, g.size, g.min_minutes) for g in ordered],
+    )
+
+
+# --- players for the API (slice 3b) ----------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class SearchEntry:
+    """One player of a scope, as the search index needs him."""
+
+    player_id: int
+    external_id: str
+    name: str
+    short_name: str | None
+    team: str | None  # the team he played most minutes for
+    peer_role: str | None
+    minutes: int
+
+
+def search_entries(session: Session, scope_id: int) -> list[SearchEntry]:
+    teams = _main_teams(session, scope_id)
+    return [
+        SearchEntry(player_id, external_id, name, short_name, teams.get(player_id), role, minutes)
+        for player_id, external_id, name, short_name, role, minutes in session.execute(
+            select(
+                Player.id,
+                PlayerSourceId.external_id,
+                Player.name,
+                Player.short_name,
+                PlayerScope.peer_role,
+                PlayerScope.minutes,
+            )
+            .join(PlayerSourceId, PlayerSourceId.player_id == Player.id)
+            .join(PlayerScope, PlayerScope.player_id == Player.id)
+            .where(PlayerSourceId.source == SOURCE, PlayerScope.scope_id == scope_id)
+            .order_by(Player.id)
+        )
+    ]
+
+
+def player_id_for(session: Session, external_id: str) -> int | None:
+    return session.scalar(
+        select(PlayerSourceId.player_id).where(
+            PlayerSourceId.source == SOURCE, PlayerSourceId.external_id == external_id
+        )
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PlayerExtras:
+    """What the player card needs beyond PlayerSeason: the profile and his coverage."""
+
+    short_name: str | None
+    country_code: str | None
+    image_url: str | None
+    matches_without_advanced: int  # his matches with ANALYTICS_UNAVAILABLE
+    matches_without_heatmap: int  # his matches whose heatmaps are missing (or not fetched)
+
+
+def player_extras(session: Session, season_id: int, player_id: int) -> PlayerExtras:
+    player = session.get_one(Player, player_id)
+    advanced, heatmap = session.execute(
+        select(
+            _count(Match.advanced_status == "unavailable"),
+            _count(Match.heatmaps_status != "ok"),
+        )
+        .join(Appearance, Appearance.match_id == Match.id)
+        .where(Match.season_id == season_id, Appearance.player_id == player_id)
+    ).one()
+    return PlayerExtras(
+        player.short_name, player.country_code, player.image_url, int(advanced or 0),
+        int(heatmap or 0),
+    )  # fmt: skip
+
+
+@dataclass(frozen=True, slots=True)
+class PlayerMatchValue:
+    """One appearance and one metric's stored value in it (form and trend lines)."""
+
+    match_id: str  # PitchAPI match ID
+    match_date: date
+    team: str
+    opponent: str
+    home: bool
+    goals_for: int | None
+    goals_against: int | None
+    minutes: int
+    started: bool | None
+    value: float | None  # NULL stays NULL; successes for a success rate
+    denominator: float | None  # attempts for a success rate
+
+
+def player_matches(
+    session: Session, season_id: int, player_id: int, metric_code: str
+) -> list[PlayerMatchValue]:
+    """Every appearance of the player in the season, oldest first, with the metric's stored
+    value. Appearances without a row (no data that match) are kept, with value None, so a
+    trend line shows the gap instead of skipping the match."""
+    metric_id = session.scalar(select(Metric.id).where(Metric.code == metric_code))
+    team, opponent = aliased(Team), aliased(Team)
+    rows = session.execute(
+        select(
+            MatchSourceId.external_id.label("match_id"),
+            Match.match_date,
+            Match.home_team_id,
+            Match.home_score,
+            Match.away_score,
+            team.name.label("team_name"),
+            opponent.name.label("opponent_name"),
+            Appearance.team_id,
+            Appearance.minutes,
+            Appearance.is_starter.label("started"),
+            StatValue.value,
+            StatValue.denominator,
+        )
+        .join(Appearance, Appearance.match_id == Match.id)
+        .join(MatchSourceId, MatchSourceId.match_id == Match.id)
+        .join(team, team.id == Appearance.team_id)
+        .join(
+            opponent,
+            opponent.id
+            == case(
+                (Match.home_team_id == Appearance.team_id, Match.away_team_id),
+                else_=Match.home_team_id,
+            ),
+        )
+        .outerjoin(
+            StatValue,
+            (StatValue.appearance_id == Appearance.id) & (StatValue.metric_id == metric_id),
+        )
+        .where(
+            Match.season_id == season_id,
+            Appearance.player_id == player_id,
+            MatchSourceId.source == SOURCE,
+        )
+        .order_by(Match.kickoff_utc, Match.id)
+    )
+    out = []
+    for row in rows:
+        home = row.home_team_id == row.team_id
+        out.append(
+            PlayerMatchValue(
+                match_id=row.match_id,
+                match_date=row.match_date,
+                team=row.team_name,
+                opponent=row.opponent_name,
+                home=home,
+                goals_for=row.home_score if home else row.away_score,
+                goals_against=row.away_score if home else row.home_score,
+                minutes=row.minutes,
+                started=row.started,
+                value=row.value,
+                denominator=row.denominator,
+            )
+        )
+    return out
+
+
+# --- a peer group with chosen metrics (API slice 3c) -------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class GroupStat:
+    """One member's season numbers for one metric; `pct` None = not ranked on it."""
+
+    total: float | None
+    denominator: float | None
+    minutes: int
+    per90: float | None
+    rate: float | None
+    pct: float | None
+    ranked_among: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class GroupMember:
+    player_id: int
+    external_id: str
+    name: str
+    team: str
+    minutes: int
+    stats: dict[str, GroupStat]  # metric code -> numbers; missing code = no data
+
+
+@dataclass(frozen=True, slots=True)
+class GroupView:
+    group: GroupInfo
+    members: list[GroupMember]  # by name; the caller sorts
+
+
+def group_view(
+    session: Session,
+    scope_id: int,
+    peer_role: str,
+    metric_codes: list[str],
+    min_minutes: int | None = None,
+) -> GroupView | None:
+    """Every member of one stored peer group (peer role, at least the group's minutes) with
+    his season numbers and percentiles for the given metrics. None if the scope has no such
+    group. Members with no data for a metric simply lack that code in `stats`.
+
+    With `min_minutes`: the players of that role with at least that many minutes instead,
+    and no percentiles (`pct` None: the caller ranks them on the fly, slice 3d)."""
+    stored = session.scalars(
+        select(PeerGroup).where(PeerGroup.scope_id == scope_id, PeerGroup.peer_role == peer_role)
+    ).first()
+    if min_minutes is None:
+        if stored is None:
+            return None
+        group = GroupInfo(stored.peer_role, stored.size, stored.min_minutes)
+    else:
+        group = GroupInfo(peer_role, 0, min_minutes)  # size set below
+    teams = _main_teams(session, scope_id)
+    people = session.execute(
+        select(Player.id, PlayerSourceId.external_id, Player.name, PlayerScope.minutes)
+        .join(PlayerScope, PlayerScope.player_id == Player.id)
+        .join(PlayerSourceId, PlayerSourceId.player_id == Player.id)
+        .where(
+            PlayerScope.scope_id == scope_id,
+            PlayerScope.peer_role == peer_role,
+            PlayerScope.minutes >= group.min_minutes,
+            PlayerSourceId.source == SOURCE,
+        )
+        .order_by(Player.name, Player.id)
+    ).all()
+    if min_minutes is not None:
+        group = GroupInfo(peer_role, len(people), min_minutes)
+    ids = [row.id for row in people]
+    code_of: dict[int, str] = {
+        metric_id: code
+        for code, metric_id in session.execute(
+            select(Metric.code, Metric.id).where(Metric.code.in_(metric_codes))
+        )
+    }
+    ranks = (
+        {
+            (player_id, metric_id): (pct, ranked_among)
+            for player_id, metric_id, pct, ranked_among in session.execute(
+                select(
+                    Percentile.player_id,
+                    Percentile.metric_id,
+                    Percentile.pct,
+                    Percentile.ranked_among,
+                ).where(
+                    Percentile.peer_group_id == stored.id,
+                    Percentile.metric_id.in_(list(code_of)),
+                )
+            )
+        }
+        if min_minutes is None and stored is not None
+        else {}
+    )
+    stats: dict[int, dict[str, GroupStat]] = {player_id: {} for player_id in ids}
+    for stat in session.scalars(
+        select(PlayerScopeStat).where(
+            PlayerScopeStat.scope_id == scope_id,
+            PlayerScopeStat.player_id.in_(ids),
+            PlayerScopeStat.metric_id.in_(list(code_of)),
+        )
+    ):
+        pct, ranked_among = ranks.get((stat.player_id, stat.metric_id), (None, None))
+        stats[stat.player_id][code_of[stat.metric_id]] = GroupStat(
+            total=stat.total,
+            denominator=stat.denominator,
+            minutes=stat.minutes,
+            per90=stat.per90,
+            rate=stat.rate,
+            pct=pct,
+            ranked_among=ranked_among,
+        )
+    return GroupView(
+        group=group,
+        members=[
+            GroupMember(
+                player_id=row.id,
+                external_id=row.external_id,
+                name=row.name,
+                team=teams.get(row.id, "?"),
+                minutes=row.minutes,
+                stats=stats[row.id],
+            )
+            for row in people
+        ],
+    )
