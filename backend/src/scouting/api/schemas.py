@@ -261,3 +261,68 @@ class PlayerMatchesOut(_Out):
     basis: Literal["per90", "rate"]
     rate_scale: Literal["share", "percent", "metres"] | None
     matches: list[MatchValueOut]
+
+
+# --- templates applied, peer groups (slice 3c) ---------------------------------------------------
+
+
+class TemplateRefOut(_Out):
+    id: str
+    label: str
+    peer_role: str
+    # False: a template for another position; his percentiles are still against his own
+    # group (`group`), so label them that way. Ranking against another group: /compare.
+    same_group: bool
+
+
+class TemplateSectionViewOut(_Out):
+    name: str
+    rows: list[StatLineOut]  # the template's order; a metric with no data has minutes 0
+
+
+class PlayerTemplateOut(_Out):
+    """Radar data: one player through one template."""
+
+    player: PlayerRefOut
+    provenance: ProvenanceOut
+    minutes: int
+    group: GroupOut | None  # None: not ranked; every row then has a reason
+    template: TemplateRefOut
+    sections: list[TemplateSectionViewOut]
+
+
+class GroupMetricOut(_Out):
+    metric: str
+    label: str
+    basis: Literal["per90", "rate"]  # what `value` is
+    rate_scale: Literal["share", "percent", "metres"] | None
+    model: bool
+    direction: Literal["higher", "lower", "none"]
+    ranked_among: int  # members with a percentile for it (eligibility differs per metric)
+
+
+class GroupValueOut(_Out):
+    value: float | None  # per 90 or rate (see the metric's basis); null = no data
+    total: float | None  # successes for a success rate; null for averaged rates
+    attempts: float | None  # fractions only
+    minutes: int  # exposure minutes for this metric (0 = no data)
+    pct: float | None  # 0-100 within the group, raw (the UI flips direction = lower)
+    reason: str | None  # why pct is null
+
+
+class GroupPlayerOut(_Out):
+    id: str
+    name: str
+    team: str
+    minutes: int
+    values: dict[str, GroupValueOut]  # one per requested metric code
+
+
+class GroupViewOut(_Out):
+    """Every member of a peer group on the chosen metrics: rankings, bars, scatter."""
+
+    provenance: ProvenanceOut
+    group: GroupOut
+    metrics: list[GroupMetricOut]
+    sort: str  # the metric the players are ordered by, best first (direction respected)
+    players: list[GroupPlayerOut]

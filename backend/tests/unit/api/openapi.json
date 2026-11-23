@@ -75,6 +75,70 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "GroupMetricOut": {
+        "properties": {
+          "basis": {
+            "enum": [
+              "per90",
+              "rate"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "higher",
+              "lower",
+              "none"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "boolean"
+          },
+          "ranked_among": {
+            "title": "Ranked Among",
+            "type": "integer"
+          },
+          "rate_scale": {
+            "anyOf": [
+              {
+                "enum": [
+                  "share",
+                  "percent",
+                  "metres"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Scale"
+          }
+        },
+        "required": [
+          "metric",
+          "label",
+          "basis",
+          "rate_scale",
+          "model",
+          "direction",
+          "ranked_among"
+        ],
+        "title": "GroupMetricOut",
+        "type": "object"
+      },
       "GroupOut": {
         "description": "The peer group a player's percentiles come from.",
         "properties": {
@@ -107,6 +171,153 @@
           "stored"
         ],
         "title": "GroupOut",
+        "type": "object"
+      },
+      "GroupPlayerOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "team": {
+            "title": "Team",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/GroupValueOut"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "team",
+          "minutes",
+          "values"
+        ],
+        "title": "GroupPlayerOut",
+        "type": "object"
+      },
+      "GroupValueOut": {
+        "properties": {
+          "attempts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempts"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value",
+          "total",
+          "attempts",
+          "minutes",
+          "pct",
+          "reason"
+        ],
+        "title": "GroupValueOut",
+        "type": "object"
+      },
+      "GroupViewOut": {
+        "description": "Every member of a peer group on the chosen metrics: rankings, bars, scatter.",
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/GroupOut"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMetricOut"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/GroupPlayerOut"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceOut"
+          },
+          "sort": {
+            "title": "Sort",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provenance",
+          "group",
+          "metrics",
+          "sort",
+          "players"
+        ],
+        "title": "GroupViewOut",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -698,6 +909,51 @@
           "name"
         ],
         "title": "PlayerRefOut",
+        "type": "object"
+      },
+      "PlayerTemplateOut": {
+        "description": "Radar data: one player through one template.",
+        "properties": {
+          "group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRefOut"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceOut"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateSectionViewOut"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "template": {
+            "$ref": "#/components/schemas/TemplateRefOut"
+          }
+        },
+        "required": [
+          "player",
+          "provenance",
+          "minutes",
+          "group",
+          "template",
+          "sections"
+        ],
+        "title": "PlayerTemplateOut",
         "type": "object"
       },
       "ProvenanceOut": {
@@ -1340,6 +1596,34 @@
         "title": "TemplateOut",
         "type": "object"
       },
+      "TemplateRefOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "peer_role": {
+            "title": "Peer Role",
+            "type": "string"
+          },
+          "same_group": {
+            "title": "Same Group",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "peer_role",
+          "same_group"
+        ],
+        "title": "TemplateRefOut",
+        "type": "object"
+      },
       "TemplateSectionOut": {
         "properties": {
           "metrics": {
@@ -1359,6 +1643,27 @@
           "metrics"
         ],
         "title": "TemplateSectionOut",
+        "type": "object"
+      },
+      "TemplateSectionViewOut": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/StatLineOut"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "rows"
+        ],
+        "title": "TemplateSectionViewOut",
         "type": "object"
       },
       "TemplatesOut": {
@@ -1426,6 +1731,136 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/groups/{role}": {
+      "get": {
+        "description": "Every member of the stored peer group (the role, at least the group's minutes), each\nwith value and percentile on the chosen metrics. Players below the minutes threshold\naren't members. The client picks which points to label on a scatter.",
+        "operationId": "get_group_api_v1_groups__role__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "title": "Role",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A scope key from /scopes",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "description": "A scope key from /scopes",
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated metric codes; default: the role's template",
+            "in": "query",
+            "name": "metrics",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated metric codes; default: the role's template",
+              "title": "Metrics"
+            }
+          },
+          {
+            "description": "One of the metrics; default: the first",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "One of the metrics; default: the first",
+              "title": "Sort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupViewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Get Group",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "description": "Always answers 200; `status` says whether the database is usable.",
@@ -2035,6 +2470,118 @@
           }
         },
         "summary": "Get Player Stats",
+        "tags": [
+          "players"
+        ]
+      }
+    },
+    "/api/v1/players/{player_id}/template": {
+      "get": {
+        "description": "Radar data: the player's season through a position template, in its sections. A\ntemplate for another position is still ranked in his own group (`same_group: false`).",
+        "operationId": "get_player_template_api_v1_players__player_id__template_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "title": "Player Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "description": "A scope key from /scopes, e.g. l_4WFCIZ.2025-2026",
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A template id (builtin:ST) or a peer role (ST); default: his own",
+            "in": "query",
+            "name": "template",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A template id (builtin:ST) or a peer role (ST); default: his own",
+              "title": "Template"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerTemplateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Get Player Template",
         "tags": [
           "players"
         ]

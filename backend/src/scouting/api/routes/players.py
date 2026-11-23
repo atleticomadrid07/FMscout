@@ -8,99 +8,43 @@ from fastapi import APIRouter, Query, Request
 
 from scouting.api.deps import SessionDep, aggregated_scope, player_in_scope, search_index
 from scouting.api.errors import SCOPED_ERROR_RESPONSES, ApiError
+from scouting.api.mapping import (
+    check_role,
+    empty_line_out,
+    group_out,
+    metric_codes,
+    provenance,
+    rate_scale,
+    stat_line_out,
+)
 from scouting.api.schemas import (
-    GroupOut,
     MatchValueOut,
     PlayerCoverageOut,
     PlayerMatchesOut,
     PlayerOut,
     PlayerRefOut,
-    ProvenanceOut,
+    PlayerTemplateOut,
     RatingOut,
     RoleStartsOut,
     SearchHitOut,
     SearchOut,
     SixOrEightOut,
-    StatLineOut,
     StatsOut,
     TeamMinutesOut,
+    TemplateRefOut,
+    TemplateSectionViewOut,
 )
-from scouting.db.queries import (
-    GroupInfo,
-    PlayerSeason,
-    ScopeSummary,
-    SeasonStatLine,
-    player_extras,
-    player_matches,
-)
-from scouting.domain.positions import PEER_ROLES
+from scouting.db.queries import PlayerSeason, player_extras, player_matches
 from scouting.metrics import depth as depth_rules
-from scouting.metrics.percentiles import SMALL_GROUP
-from scouting.metrics.registry import BY_CODE, MetricDef
-from scouting.metrics.templates import missing_reason
+from scouting.metrics.registry import BY_CODE
+from scouting.metrics.templates import Template, apply_template, builtin_templates, missing_reason
 
 router = APIRouter(prefix="/players", tags=["players"], responses=SCOPED_ERROR_RESPONSES)
 
 ScopeKey = Annotated[str, Query(description="A scope key from /scopes, e.g. l_4WFCIZ.2025-2026")]
 
 
-# --- mapping ---------------------------------------------------------------------------------
-
-
-def group_out(group: GroupInfo | None, *, stored: bool = True) -> GroupOut | None:
-    if group is None:
-        return None
-    return GroupOut(
-        role=group.peer_role,
-        size=group.size,
-        min_minutes=group.min_minutes,
-        small_sample=group.size < SMALL_GROUP,
-        stored=stored,
-    )
-
-
-def provenance(scope: ScopeSummary) -> ProvenanceOut:
-    return ProvenanceOut(
-        source="pitchapi",
-        scope=scope.key,
-        competition=scope.competition,
-        season=scope.season,
-        computed_at=scope.computed_at,
-    )
-
-
-RateScale = Literal["share", "percent", "metres"]
-
-
-def rate_scale(metric: MetricDef) -> RateScale | None:
-    """A success rate is a 0-1 share; an averaged rate keeps its unit (D-020)."""
-    if not metric.is_fraction:
-        return None
-    if not metric.value_is_rate:
-        return "share"
-    return "metres" if metric.unit == "m" else "percent"
-
-
-def stat_line_out(line: SeasonStatLine, season: PlayerSeason) -> StatLineOut:
-    metric = BY_CODE[line.code]
-    return StatLineOut(
-        metric=line.code,
-        label=metric.label,
-        kind=line.kind,
-        basis="rate" if metric.is_fraction else "per90",
-        model=line.is_model_output,
-        direction=metric.direction,
-        total=None if metric.value_is_rate else line.total,
-        attempts=line.denominator if metric.is_fraction else None,
-        per90=line.per90,
-        rate=line.rate,
-        rate_scale=rate_scale(metric),
-        minutes=line.minutes,
-        matches=line.matches,
-        pct=line.pct,
-        ranked_among=line.ranked_among,
-        reason=None if line.pct is not None else missing_reason(line, season),
-    )
+# --- mapping (shared helpers in api/mapping.py) ---------------------------------------------
 
 
 def _role_source(value: str | None) -> Literal["starts", "listed"] | None:
@@ -135,16 +79,6 @@ def _match_rate(value: float | None, attempts: float | None) -> float | None:
     return value / attempts
 
 
-def _codes(metrics: str | None) -> list[str] | None:
-    if metrics is None:
-        return None
-    codes = [c.strip() for c in metrics.split(",") if c.strip()]
-    unknown = [c for c in codes if c not in BY_CODE]
-    if unknown:
-        raise ApiError(404, "UNKNOWN_METRIC", f"unknown metrics: {', '.join(unknown)}")
-    return codes
-
-
 # --- routes ----------------------------------------------------------------------------------
 
 
@@ -160,10 +94,8 @@ def search_players(
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> SearchOut:
     """Accent-free fuzzy name search within one season (exact name first)."""
-    if role is not None and role not in PEER_ROLES:
-        raise ApiError(
-            400, "UNKNOWN_ROLE", f"unknown role {role!r}; one of {', '.join(PEER_ROLES)}"
-        )
+    if role is not None:
+        check_role(role)
     summary = aggregated_scope(session, scope)
     hits = search_index(request, session, summary).search(
         q, team=team, role=role, min_minutes=min_minutes, limit=limit
@@ -228,7 +160,7 @@ def get_player_stats(
     metrics: Annotated[str | None, Query(description="Comma-separated metric codes")] = None,
 ) -> StatsOut:
     """The full stat table (or the chosen metrics, in the order given)."""
-    codes = _codes(metrics)
+    codes = metric_codes(metrics)
     summary = aggregated_scope(session, scope)
     _, season = player_in_scope(session, summary, player_id)
     lines = {line.code: line for line in season.stats}
@@ -282,5 +214,66 @@ def get_player_matches(
                 rate=_match_rate(r.value, r.denominator) if fraction else None,
             )
             for r in rows
+        ],
+    )
+
+
+def find_template(key: str) -> Template:
+    """A template by id (`builtin:ST`) or, as a shortcut, by peer role (`ST`)."""
+    templates = builtin_templates()
+    by_id = {t.id: t for t in templates.values()}
+    template = by_id.get(key) or templates.get(key)
+    if template is None:
+        raise ApiError(404, "UNKNOWN_TEMPLATE", f"no template {key!r}; see /api/v1/templates")
+    return template
+
+
+@router.get("/{player_id}/template")
+def get_player_template(
+    player_id: str,
+    session: SessionDep,
+    scope: ScopeKey,
+    template: Annotated[
+        str | None,
+        Query(description="A template id (builtin:ST) or a peer role (ST); default: his own"),
+    ] = None,
+) -> PlayerTemplateOut:
+    """Radar data: the player's season through a position template, in its sections. A
+    template for another position is still ranked in his own group (`same_group: false`)."""
+    summary = aggregated_scope(session, scope)
+    _, season = player_in_scope(session, summary, player_id)
+    if template is not None:
+        chosen = find_template(template)
+    elif season.peer_role is not None:
+        chosen = find_template(season.peer_role)
+    else:
+        raise ApiError(
+            400,
+            "TEMPLATE_REQUIRED",
+            f"{season.external_id} has no peer role (no starts); pass template=, e.g. builtin:ST",
+        )
+    view = apply_template(season, chosen)
+    return PlayerTemplateOut(
+        player=PlayerRefOut(id=season.external_id, name=season.name),
+        provenance=provenance(summary),
+        minutes=season.minutes,
+        group=group_out(view.group),
+        template=TemplateRefOut(
+            id=chosen.id,
+            label=chosen.label,
+            peer_role=chosen.peer_role,
+            same_group=view.same_group,
+        ),
+        sections=[
+            TemplateSectionViewOut(
+                name=name,
+                rows=[
+                    stat_line_out(row.line, season)
+                    if row.line is not None
+                    else empty_line_out(row.code, season)
+                    for row in rows
+                ],
+            )
+            for name, rows in view.sections
         ],
     )

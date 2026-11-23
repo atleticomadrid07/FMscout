@@ -91,8 +91,9 @@ def test_requests_change_nothing(client: TestClient) -> None:
     for path in ("/health", "/scopes", f"/scopes/{KEY}", "/metrics", "/templates"):
         assert client.get(f"/api/v1{path}").status_code == 200
     params = {"scope": KEY, "q": "keeper", "metric": "shots"}  # slice 3b's routes
-    for path in ("/search", "/p_CST01", "/p_CST01/stats", "/p_CST01/matches"):
+    for path in ("/search", "/p_CST01", "/p_CST01/stats", "/p_CST01/matches", "/p_CST01/template"):
         assert client.get(f"/api/v1/players{path}", params=params).status_code == 200
+    assert client.get("/api/v1/groups/GK", params={"scope": KEY}).status_code == 200  # 3c
     assert cli("report", "checksum").output == before
 
 

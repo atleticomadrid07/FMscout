@@ -886,3 +886,114 @@ def player_matches(
             )
         )
     return out
+
+
+# --- a peer group with chosen metrics (API slice 3c) -------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class GroupStat:
+    """One member's season numbers for one metric; `pct` None = not ranked on it."""
+
+    total: float | None
+    denominator: float | None
+    minutes: int
+    per90: float | None
+    rate: float | None
+    pct: float | None
+    ranked_among: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class GroupMember:
+    player_id: int
+    external_id: str
+    name: str
+    team: str
+    minutes: int
+    stats: dict[str, GroupStat]  # metric code -> numbers; missing code = no data
+
+
+@dataclass(frozen=True, slots=True)
+class GroupView:
+    group: GroupInfo
+    members: list[GroupMember]  # by name; the caller sorts
+
+
+def group_view(
+    session: Session, scope_id: int, peer_role: str, metric_codes: list[str]
+) -> GroupView | None:
+    """Every member of one stored peer group (peer role, at least the group's minutes) with
+    his season numbers and percentiles for the given metrics. None if the scope has no such
+    group. Members with no data for a metric simply lack that code in `stats`."""
+    group = session.scalars(
+        select(PeerGroup).where(PeerGroup.scope_id == scope_id, PeerGroup.peer_role == peer_role)
+    ).first()
+    if group is None:
+        return None
+    teams = _main_teams(session, scope_id)
+    people = session.execute(
+        select(Player.id, PlayerSourceId.external_id, Player.name, PlayerScope.minutes)
+        .join(PlayerScope, PlayerScope.player_id == Player.id)
+        .join(PlayerSourceId, PlayerSourceId.player_id == Player.id)
+        .where(
+            PlayerScope.scope_id == scope_id,
+            PlayerScope.peer_role == peer_role,
+            PlayerScope.minutes >= group.min_minutes,
+            PlayerSourceId.source == SOURCE,
+        )
+        .order_by(Player.name, Player.id)
+    ).all()
+    ids = [row.id for row in people]
+    code_of: dict[int, str] = {
+        metric_id: code
+        for code, metric_id in session.execute(
+            select(Metric.code, Metric.id).where(Metric.code.in_(metric_codes))
+        )
+    }
+    ranks = {
+        (player_id, metric_id): (pct, ranked_among)
+        for player_id, metric_id, pct, ranked_among in session.execute(
+            select(
+                Percentile.player_id,
+                Percentile.metric_id,
+                Percentile.pct,
+                Percentile.ranked_among,
+            ).where(
+                Percentile.peer_group_id == group.id,
+                Percentile.metric_id.in_(list(code_of)),
+            )
+        )
+    }
+    stats: dict[int, dict[str, GroupStat]] = {player_id: {} for player_id in ids}
+    for stat in session.scalars(
+        select(PlayerScopeStat).where(
+            PlayerScopeStat.scope_id == scope_id,
+            PlayerScopeStat.player_id.in_(ids),
+            PlayerScopeStat.metric_id.in_(list(code_of)),
+        )
+    ):
+        pct, ranked_among = ranks.get((stat.player_id, stat.metric_id), (None, None))
+        stats[stat.player_id][code_of[stat.metric_id]] = GroupStat(
+            total=stat.total,
+            denominator=stat.denominator,
+            minutes=stat.minutes,
+            per90=stat.per90,
+            rate=stat.rate,
+            pct=pct,
+            ranked_among=ranked_among,
+        )
+    return GroupView(
+        group=GroupInfo(group.peer_role, group.size, group.min_minutes),
+        members=[
+            GroupMember(
+                player_id=row.id,
+                external_id=row.external_id,
+                name=row.name,
+                team=teams.get(row.id, "?"),
+                minutes=row.minutes,
+                stats=stats[row.id],
+            )
+            for row in people
+        ],
+    )

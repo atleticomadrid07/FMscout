@@ -38,3 +38,20 @@ Approaches that failed, what fixed them, and what to remember. Check before sugg
 - **Cause:** the migration paste text was delivered as a `.py` file, and a copy landed in `migrations/versions/`. Alembic loads every `.py` there as a revision.
 - **Fix:** moved the copy out (`mv … ~/Downloads/migration_2d3_copy.py`).
 - **Remember:** send migration paste text as `.txt`, or apply it with a one-shot command that edits the generated file (as done for 2d-3). Also: Alembic's ruff post-write hook strips the unused `sa`/`op` imports from an empty revision, so pasted bodies must add them back.
+
+## 2026-11-21 · Patched constants didn't reach `classify`
+- **Symptom:** a test that monkeypatched the 6/8 cut saw no change.
+- **Cause:** the cut was a default argument, bound when the function was defined.
+- **Fix and remember:** defaults that tests (or reports) may change are `None` and read from the module at call time; the CLI imports `metrics.depth` as a module.
+
+## 2026-11-22 · Read-only SQLite URL through `make_engine` (Claude's workspace)
+- **Symptom:** a folder literally named `file:` appeared next to the database.
+- **Cause:** `make_engine` creates the database's parent folder, and with the URI form (`sqlite:///file:/abs/path?mode=ro&uri=true`) it took `file:` as part of the path.
+- **Fix:** the API's `read_only_engine` uses plain `create_engine` (nothing to create for a read-only database).
+- **Remember:** helpers that prepare a path for writing don't fit read-only URIs.
+
+## 2026-11-22 · Test layout broke mypy (Claude's workspace)
+- **Symptom:** mypy reported a duplicate module / "found twice" after adding API tests.
+- **Cause:** tests run with `--import-mode=importlib` and no `__init__.py`, so a second `conftest.py` (in `tests/unit/api/`) and one test module importing another both put the same module name on mypy's path twice.
+- **Fix:** the `api_db` fixture lives in the root `tests/conftest.py`; small helpers (`cli()`, `error()`, the `client` fixture) are repeated inline in each API test file.
+- **Remember:** one `conftest.py`, and test modules never import each other.
