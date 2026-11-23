@@ -94,6 +94,11 @@ def test_requests_change_nothing(client: TestClient) -> None:
     for path in ("/search", "/p_CST01", "/p_CST01/stats", "/p_CST01/matches", "/p_CST01/template"):
         assert client.get(f"/api/v1/players{path}", params=params).status_code == 200
     assert client.get("/api/v1/groups/GK", params={"scope": KEY}).status_code == 200  # 3c
+    for extra in ({}, {"min_minutes": 100}, {"against": "W"}):  # 3d
+        compare = {"scope": KEY, "players": "p_CST01,p_CGK01", **extra}
+        assert client.get("/api/v1/compare", params=compare).status_code == 200
+    custom = {"scope": KEY, "min_minutes": 100}
+    assert client.get("/api/v1/groups/GK", params=custom).status_code == 200
     assert cli("report", "checksum").output == before
 
 

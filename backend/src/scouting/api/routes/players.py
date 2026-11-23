@@ -11,12 +11,14 @@ from scouting.api.errors import SCOPED_ERROR_RESPONSES, ApiError
 from scouting.api.mapping import (
     check_role,
     empty_line_out,
+    find_template,
     group_out,
     metric_codes,
     provenance,
     rate_scale,
     stat_line_out,
 )
+from scouting.api.ranking import custom_threshold, season_at
 from scouting.api.schemas import (
     MatchValueOut,
     PlayerCoverageOut,
@@ -36,12 +38,21 @@ from scouting.api.schemas import (
 )
 from scouting.db.queries import PlayerSeason, player_extras, player_matches
 from scouting.metrics import depth as depth_rules
+from scouting.metrics.percentiles import MIN_MINUTES_FLOOR
 from scouting.metrics.registry import BY_CODE
-from scouting.metrics.templates import Template, apply_template, builtin_templates, missing_reason
+from scouting.metrics.templates import apply_template, missing_reason
 
 router = APIRouter(prefix="/players", tags=["players"], responses=SCOPED_ERROR_RESPONSES)
 
 ScopeKey = Annotated[str, Query(description="A scope key from /scopes, e.g. l_4WFCIZ.2025-2026")]
+MinMinutes = Annotated[
+    int | None,
+    Query(
+        ge=MIN_MINUTES_FLOOR,
+        description="Rank in a peer group of players with at least this many minutes, "
+        "computed on the fly (`stored: false`); default: the stored threshold",
+    ),
+]
 
 
 # --- mapping (shared helpers in api/mapping.py) ---------------------------------------------
@@ -158,18 +169,22 @@ def get_player_stats(
     session: SessionDep,
     scope: ScopeKey,
     metrics: Annotated[str | None, Query(description="Comma-separated metric codes")] = None,
+    min_minutes: MinMinutes = None,
 ) -> StatsOut:
     """The full stat table (or the chosen metrics, in the order given)."""
     codes = metric_codes(metrics)
     summary = aggregated_scope(session, scope)
     _, season = player_in_scope(session, summary, player_id)
+    threshold = custom_threshold(summary, min_minutes)
+    if threshold is not None:
+        season = season_at(session, summary, season, threshold)
     lines = {line.code: line for line in season.stats}
     order = codes if codes is not None else [line.code for line in season.stats]
     return StatsOut(
         player=PlayerRefOut(id=season.external_id, name=season.name),
         provenance=provenance(summary),
         minutes=season.minutes,
-        group=group_out(season.group),
+        group=group_out(season.group, stored=threshold is None),
         stats=[stat_line_out(lines[c], season) for c in order if c in lines],
         missing=[c for c in order if c not in lines],
     )
@@ -218,16 +233,6 @@ def get_player_matches(
     )
 
 
-def find_template(key: str) -> Template:
-    """A template by id (`builtin:ST`) or, as a shortcut, by peer role (`ST`)."""
-    templates = builtin_templates()
-    by_id = {t.id: t for t in templates.values()}
-    template = by_id.get(key) or templates.get(key)
-    if template is None:
-        raise ApiError(404, "UNKNOWN_TEMPLATE", f"no template {key!r}; see /api/v1/templates")
-    return template
-
-
 @router.get("/{player_id}/template")
 def get_player_template(
     player_id: str,
@@ -237,6 +242,7 @@ def get_player_template(
         str | None,
         Query(description="A template id (builtin:ST) or a peer role (ST); default: his own"),
     ] = None,
+    min_minutes: MinMinutes = None,
 ) -> PlayerTemplateOut:
     """Radar data: the player's season through a position template, in its sections. A
     template for another position is still ranked in his own group (`same_group: false`)."""
@@ -252,12 +258,15 @@ def get_player_template(
             "TEMPLATE_REQUIRED",
             f"{season.external_id} has no peer role (no starts); pass template=, e.g. builtin:ST",
         )
+    threshold = custom_threshold(summary, min_minutes)
+    if threshold is not None:
+        season = season_at(session, summary, season, threshold)
     view = apply_template(season, chosen)
     return PlayerTemplateOut(
         player=PlayerRefOut(id=season.external_id, name=season.name),
         provenance=provenance(summary),
         minutes=season.minutes,
-        group=group_out(view.group),
+        group=group_out(view.group, stored=threshold is None),
         template=TemplateRefOut(
             id=chosen.id,
             label=chosen.label,

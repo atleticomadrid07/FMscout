@@ -1,6 +1,306 @@
 {
   "components": {
     "schemas": {
+      "CompareMetricOut": {
+        "properties": {
+          "basis": {
+            "enum": [
+              "per90",
+              "rate"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "higher",
+              "lower",
+              "none"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "boolean"
+          },
+          "rate_scale": {
+            "anyOf": [
+              {
+                "enum": [
+                  "share",
+                  "percent",
+                  "metres"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Scale"
+          }
+        },
+        "required": [
+          "metric",
+          "label",
+          "basis",
+          "rate_scale",
+          "model",
+          "direction"
+        ],
+        "title": "CompareMetricOut",
+        "type": "object"
+      },
+      "CompareOut": {
+        "description": "2-6 players side by side, each in his own group or all against one (`against`).",
+        "properties": {
+          "against": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Against"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/CompareMetricOut"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "min_minutes": {
+            "title": "Min Minutes",
+            "type": "integer"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/ComparePlayerOut"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceOut"
+          },
+          "stored": {
+            "title": "Stored",
+            "type": "boolean"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompareTemplateOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "provenance",
+          "template",
+          "against",
+          "min_minutes",
+          "stored",
+          "metrics",
+          "players"
+        ],
+        "title": "CompareOut",
+        "type": "object"
+      },
+      "ComparePlayerOut": {
+        "properties": {
+          "group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "outside_group": {
+            "title": "Outside Group",
+            "type": "boolean"
+          },
+          "peer_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peer Role"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CompareValueOut"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "team",
+          "minutes",
+          "peer_role",
+          "group",
+          "outside_group",
+          "values"
+        ],
+        "title": "ComparePlayerOut",
+        "type": "object"
+      },
+      "CompareTemplateOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "peer_role": {
+            "title": "Peer Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "peer_role"
+        ],
+        "title": "CompareTemplateOut",
+        "type": "object"
+      },
+      "CompareValueOut": {
+        "properties": {
+          "attempts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempts"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct"
+          },
+          "ranked_among": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ranked Among"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value",
+          "total",
+          "attempts",
+          "minutes",
+          "pct",
+          "ranked_among",
+          "reason"
+        ],
+        "title": "CompareValueOut",
+        "type": "object"
+      },
       "CoverageOut": {
         "description": "What the season's matches have, so gaps show as gaps (not blanks or zeros).",
         "properties": {
@@ -1731,6 +2031,175 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/compare": {
+      "get": {
+        "description": "Players side by side on the same metrics, each with value and percentile.",
+        "operationId": "compare_api_v1_compare_get",
+        "parameters": [
+          {
+            "description": "A scope key from /scopes",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "description": "A scope key from /scopes",
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "2-6 comma-separated player ids",
+            "in": "query",
+            "name": "players",
+            "required": true,
+            "schema": {
+              "description": "2-6 comma-separated player ids",
+              "title": "Players",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated metric codes",
+            "in": "query",
+            "name": "metrics",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated metric codes",
+              "title": "Metrics"
+            }
+          },
+          {
+            "description": "A template id or role; default: the first player's position",
+            "in": "query",
+            "name": "template",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A template id or role; default: the first player's position",
+              "title": "Template"
+            }
+          },
+          {
+            "description": "Rank everyone against this role's group",
+            "in": "query",
+            "name": "against",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Rank everyone against this role's group",
+              "title": "Against"
+            }
+          },
+          {
+            "description": "The groups' threshold; default: the stored one",
+            "in": "query",
+            "name": "min_minutes",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 90,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The groups' threshold; default: the stored one",
+              "title": "Min Minutes"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompareOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad request (BAD_REQUEST)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Season not aggregated (SCOPE_NOT_AGGREGATED)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database not ready (SCHEMA_OUT_OF_DATE)"
+          }
+        },
+        "summary": "Compare",
+        "tags": [
+          "compare"
+        ]
+      }
+    },
     "/api/v1/groups/{role}": {
       "get": {
         "description": "Every member of the stored peer group (the role, at least the group's minutes), each\nwith value and percentile on the chosen metrics. Players below the minutes threshold\naren't members. The client picks which points to label on a scatter.",
@@ -1790,6 +2259,25 @@
               ],
               "description": "One of the metrics; default: the first",
               "title": "Sort"
+            }
+          },
+          {
+            "description": "A different threshold, computed on the fly",
+            "in": "query",
+            "name": "min_minutes",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 90,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A different threshold, computed on the fly",
+              "title": "Min Minutes"
             }
           }
         ],
@@ -2405,6 +2893,25 @@
               "description": "Comma-separated metric codes",
               "title": "Metrics"
             }
+          },
+          {
+            "description": "Rank in a peer group of players with at least this many minutes, computed on the fly (`stored: false`); default: the stored threshold",
+            "in": "query",
+            "name": "min_minutes",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 90,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Rank in a peer group of players with at least this many minutes, computed on the fly (`stored: false`); default: the stored threshold",
+              "title": "Min Minutes"
+            }
           }
         ],
         "responses": {
@@ -2516,6 +3023,25 @@
               ],
               "description": "A template id (builtin:ST) or a peer role (ST); default: his own",
               "title": "Template"
+            }
+          },
+          {
+            "description": "Rank in a peer group of players with at least this many minutes, computed on the fly (`stored: false`); default: the stored threshold",
+            "in": "query",
+            "name": "min_minutes",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 90,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Rank in a peer group of players with at least this many minutes, computed on the fly (`stored: false`); default: the stored threshold",
+              "title": "Min Minutes"
             }
           }
         ],

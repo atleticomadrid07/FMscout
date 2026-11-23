@@ -20,7 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from scouting.api.deps import read_only_engine
 from scouting.api.errors import install_error_handlers
-from scouting.api.routes import groups, meta, metrics, players, scopes, templates
+from scouting.api.routes import compare, groups, meta, metrics, players, scopes, templates
 from scouting.config.settings import Settings
 from scouting.db.schema_version import SchemaOutOfDateError, check_schema_current
 
@@ -56,7 +56,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         CORSMiddleware, allow_origins=list(DEV_ORIGINS), allow_methods=["GET"], allow_headers=["*"]
     )
     install_error_handlers(app)
-    routers = (meta, scopes, metrics, templates, players, groups)
+    routers = (meta, scopes, metrics, templates, players, groups, compare)
     for router in (module.router for module in routers):
         app.include_router(router, prefix=PREFIX)
     return app

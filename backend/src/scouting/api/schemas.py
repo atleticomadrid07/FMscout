@@ -326,3 +326,56 @@ class GroupViewOut(_Out):
     metrics: list[GroupMetricOut]
     sort: str  # the metric the players are ordered by, best first (direction respected)
     players: list[GroupPlayerOut]
+
+
+# --- compare (slice 3d) ------------------------------------------------------------------------
+
+
+class CompareMetricOut(_Out):
+    metric: str
+    label: str
+    basis: Literal["per90", "rate"]  # what `value` is
+    rate_scale: Literal["share", "percent", "metres"] | None
+    model: bool
+    direction: Literal["higher", "lower", "none"]
+
+
+class CompareValueOut(_Out):
+    value: float | None  # per 90 or rate; null = no data
+    total: float | None  # null for averaged rates
+    attempts: float | None  # fractions only
+    minutes: int  # exposure minutes for this metric (0 = no data)
+    pct: float | None  # 0-100 in the player's `group`, raw (the UI flips direction = lower)
+    ranked_among: int | None  # group members ranked on it (an outside player isn't counted)
+    reason: str | None  # why pct is null
+
+
+class ComparePlayerOut(_Out):
+    id: str
+    name: str
+    team: str | None
+    minutes: int
+    peer_role: str | None  # his own group's role
+    group: GroupOut | None  # the group his percentiles are against; None: not ranked
+    # True: he isn't a member of `group` (another role, or under its minutes). He's ranked
+    # against its members without being added, so nobody else's percentile moves.
+    outside_group: bool
+    values: dict[str, CompareValueOut]  # one per metric code
+
+
+class CompareTemplateOut(_Out):
+    id: str
+    label: str
+    peer_role: str
+
+
+class CompareOut(_Out):
+    """2-6 players side by side, each in his own group or all against one (`against`)."""
+
+    provenance: ProvenanceOut
+    template: CompareTemplateOut | None  # where the metrics came from; None: `metrics=` given
+    against: str | None  # the role everyone is ranked against; None: each in his own group
+    min_minutes: int  # the groups' threshold
+    stored: bool  # False: a non-default threshold (computed on the fly)
+    metrics: list[CompareMetricOut]
+    players: list[ComparePlayerOut]

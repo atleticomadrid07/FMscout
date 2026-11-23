@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Final, Literal
 
 from scouting.api.errors import ApiError
 from scouting.api.schemas import GroupOut, ProvenanceOut, StatLineOut
@@ -10,9 +10,10 @@ from scouting.db.queries import GroupInfo, PlayerSeason, ScopeSummary, SeasonSta
 from scouting.domain.positions import PEER_ROLES
 from scouting.metrics.percentiles import SMALL_GROUP
 from scouting.metrics.registry import BY_CODE, MetricDef
-from scouting.metrics.templates import missing_reason
+from scouting.metrics.templates import Template, builtin_templates, missing_reason
 
 RateScale = Literal["share", "percent", "metres"]
+MAX_METRICS: Final = 14  # per request: the largest template size (D-019), so any template fits
 
 
 def group_out(group: GroupInfo | None, *, stored: bool = True) -> GroupOut | None:
@@ -113,3 +114,13 @@ def check_role(role: str) -> str:
             400, "UNKNOWN_ROLE", f"unknown role {role!r}; one of {', '.join(PEER_ROLES)}"
         )
     return role
+
+
+def find_template(key: str) -> Template:
+    """A template by id (`builtin:ST`) or, as a shortcut, by peer role (`ST`)."""
+    templates = builtin_templates()
+    by_id = {t.id: t for t in templates.values()}
+    template = by_id.get(key) or templates.get(key)
+    if template is None:
+        raise ApiError(404, "UNKNOWN_TEMPLATE", f"no template {key!r}; see /api/v1/templates")
+    return template

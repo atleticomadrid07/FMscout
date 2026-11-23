@@ -12,7 +12,8 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from scouting.api.app import create_app
-from scouting.api.routes.groups import MAX_METRICS, sort_members
+from scouting.api.mapping import MAX_METRICS
+from scouting.api.routes.groups import sort_members
 from scouting.cli.main import app as cli_app
 from scouting.db.queries import GroupMember, GroupStat
 from scouting.metrics.registry import BY_CODE

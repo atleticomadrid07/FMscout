@@ -2,26 +2,36 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Annotated
 
 from fastapi import APIRouter, Query
+from sqlalchemy.orm import Session
 
 from scouting.api.deps import SessionDep, aggregated_scope
 from scouting.api.errors import SCOPED_ERROR_RESPONSES, ApiError
-from scouting.api.mapping import basis, check_role, group_out, metric_codes, provenance, rate_scale
+from scouting.api.mapping import (
+    MAX_METRICS,
+    basis,
+    check_role,
+    group_out,
+    metric_codes,
+    provenance,
+    rate_scale,
+)
+from scouting.api.ranking import custom_threshold
 from scouting.api.schemas import (
     GroupMetricOut,
     GroupPlayerOut,
     GroupValueOut,
     GroupViewOut,
 )
-from scouting.db.queries import GroupMember, GroupStat, group_view
+from scouting.db.queries import GroupMember, GroupStat, GroupView, group_view
+from scouting.metrics.percentiles import MIN_MINUTES_FLOOR, eligible_value, live_group
 from scouting.metrics.registry import BY_CODE, MetricDef
 from scouting.metrics.templates import builtin_templates, stat_reason
 
 router = APIRouter(prefix="/groups", tags=["groups"], responses=SCOPED_ERROR_RESPONSES)
-
-MAX_METRICS = 14  # the largest template size (D-019), so any template's metrics fit
 
 
 def value_out(stat: GroupStat | None, metric: MetricDef, group_min_minutes: int) -> GroupValueOut:
@@ -48,6 +58,33 @@ def value_out(stat: GroupStat | None, metric: MetricDef, group_min_minutes: int)
     )
 
 
+def ranked_live(session: Session, scope_id: int, view: GroupView, codes: list[str]) -> GroupView:
+    """The members' percentiles at the view's (non-default) threshold, computed on the fly."""
+    live = live_group(session, scope_id, view.group.peer_role, view.group.min_minutes, codes)
+    members = []
+    for member in view.members:
+        stats = {}
+        for code, stat in member.stats.items():
+            metric = BY_CODE[code]
+            value = eligible_value(
+                is_fraction=metric.is_fraction,
+                rate=stat.rate,
+                per90=stat.per90,
+                denominator=stat.denominator,
+                minutes=stat.minutes,
+                min_attempts=metric.min_attempts,
+                min_minutes=view.group.min_minutes,
+            )
+            ranked = live.rank(code, value) if value is not None else None
+            stats[code] = replace(
+                stat,
+                pct=None if ranked is None else ranked[0],
+                ranked_among=None if ranked is None else ranked[1],
+            )
+        members.append(replace(member, stats=stats))
+    return replace(view, members=members)
+
+
 def sort_members(members: list[GroupMember], metric: MetricDef) -> list[GroupMember]:
     """Best first on one metric (lowest first when lower is better), no value last, then by
     name. A metric with no direction sorts highest first."""
@@ -71,6 +108,10 @@ def get_group(
         Query(description="Comma-separated metric codes; default: the role's template"),
     ] = None,
     sort: Annotated[str | None, Query(description="One of the metrics; default: the first")] = None,
+    min_minutes: Annotated[
+        int | None,
+        Query(ge=MIN_MINUTES_FLOOR, description="A different threshold, computed on the fly"),
+    ] = None,
 ) -> GroupViewOut:
     """Every member of the stored peer group (the role, at least the group's minutes), each
     with value and percentile on the chosen metrics. Players below the minutes threshold
@@ -88,11 +129,15 @@ def get_group(
         raise ApiError(400, "BAD_REQUEST", f"sort: {sort_code!r} isn't one of the metrics asked")
     summary = aggregated_scope(session, scope)
     assert summary.scope_id is not None  # aggregated_scope checked it
-    view = group_view(session, summary.scope_id, role, codes)
-    if view is None:
-        raise ApiError(404, "GROUP_NOT_FOUND", f"{summary.key} has no {role} peer group")
+    threshold = custom_threshold(summary, min_minutes)
+    view = group_view(session, summary.scope_id, role, codes, threshold)
+    if view is None or not view.members:
+        at = "" if threshold is None else f" with at least {threshold} min"
+        raise ApiError(404, "GROUP_NOT_FOUND", f"{summary.key} has no {role} peer group{at}")
+    if threshold is not None:
+        view = ranked_live(session, summary.scope_id, view, codes)
     defs = [BY_CODE[c] for c in codes]
-    group = group_out(view.group)
+    group = group_out(view.group, stored=threshold is None)
     assert group is not None
     return GroupViewOut(
         provenance=provenance(summary),
