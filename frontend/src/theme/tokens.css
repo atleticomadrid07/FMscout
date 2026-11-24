@@ -1,0 +1,58 @@
+/*
+ * Design tokens: every colour in the app comes from here (components never hard-code one),
+ * so light/dark and the later preset themes are just other values for the same names.
+ * Chart colours (players, pizza sections, percentile scale) are added with the first chart
+ * (slice 4c) and checked for contrast and colour-blind safety in both modes.
+ */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f3;
+  --border: #d9dde3;
+  --text: #16191d;
+  --text-muted: #5b6470;
+  --accent: #1f6feb;
+  --accent-text: #ffffff;
+  --accent-soft: #e3edfd;
+  --focus: #1f6feb;
+  --warn-bg: #fff4d6;
+  --warn-text: #6b4e00;
+  --danger-bg: #fde7e7;
+  --danger-text: #8a1c1c;
+  --shadow: 0 6px 24px rgb(16 24 40 / 12%);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1216;
+  --surface: #171b21;
+  --surface-2: #20262e;
+  --border: #2e3640;
+  --text: #e7eaee;
+  --text-muted: #9aa4b1;
+  --accent: #4c8dff;
+  --accent-text: #0b0d10;
+  --accent-soft: #1b2a44;
+  --focus: #79a8ff;
+  --warn-bg: #3a3014;
+  --warn-text: #f3d68a;
+  --danger-bg: #3d1a1a;
+  --danger-text: #f4b3b3;
+  --shadow: 0 6px 24px rgb(0 0 0 / 45%);
+}
+
+:root {
+  --radius: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --topbar-height: 56px;
+  --sidebar-width: 200px;
+}

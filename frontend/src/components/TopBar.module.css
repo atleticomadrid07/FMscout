@@ -1,0 +1,54 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: var(--topbar-height);
+  padding: 0 var(--space-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.search {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.season select {
+  height: 36px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.iconButton,
+.menuButton {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.menuButton {
+  display: none;
+}
+
+@media (max-width: 800px) {
+  .menuButton {
+    display: inline-block;
+  }
+  .season {
+    display: none;
+  }
+}
